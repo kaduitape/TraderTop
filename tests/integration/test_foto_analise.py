@@ -598,3 +598,83 @@ def test_the_risk_area_sits_below_a_long_stop(db_session) -> None:
 
     # No SVG o eixo Y cresce para baixo: take acima do stop = y menor.
     assert y_take < y_stop
+
+
+# --- quem escolheu o lado --------------------------------------------------
+
+
+def test_auto_records_who_decided(db_session) -> None:
+    """Trocar o decisor sem registrar qual foi usado tornaria impossivel
+    medir se a troca ajudou."""
+    _semeia(db_session)
+
+    foto = _foto(db_session, direction="AUTO")
+
+    assert foto.direction_source in {"AISA_SENTIMENTO", "TENDENCIA"}
+    assert foto.direction_rationale
+
+
+def test_a_forced_direction_is_marked_as_the_operators(db_session) -> None:
+    """Escolha humana nao pode ser contada como acerto do automatico."""
+    _semeia(db_session)
+
+    foto = _foto(db_session, direction="VENDA")
+
+    assert foto.bias == "SHORT"
+    assert foto.direction_source == "OPERADOR"
+
+
+def test_without_news_coverage_the_trend_still_decides(db_session) -> None:
+    """A AIsa nao cobre forex nem metais — na maior parte do que se opera
+    aqui o fator vem sem dados, e o comportamento antigo precisa valer."""
+    _semeia(db_session, tendencia=1.0)
+
+    foto = _foto(db_session, direction="AUTO")
+
+    assert foto.direction_source == "TENDENCIA"
+    assert foto.bias == "LONG"
+
+
+def test_sentiment_can_override_the_trend(db_session) -> None:
+    """O ponto do recurso: noticiario vendedor numa tendencia de alta
+    inverte o lado. Sem isso a cadeia seria enfeite."""
+    from app.foto_analise.direction import (
+        FallbackDirectionProvider,
+        SentimentDirectionProvider,
+        TrendDirectionProvider,
+    )
+    from app.foto_analise.service import FotoAnaliseService
+
+    _semeia(db_session, tendencia=1.0)
+
+    class _NoticiaVendedora:
+        def decide(self, context):
+            return SentimentDirectionProvider().decide(
+                replace_news(context, 12.0)
+            )
+
+    def replace_news(context, score):
+        from dataclasses import replace
+
+        return replace(context, news_score=score)
+
+    servico = FotoAnaliseService(
+        db_session,
+        directions=FallbackDirectionProvider(
+            _NoticiaVendedora(), TrendDirectionProvider()
+        ),
+    )
+    foto = servico.build(symbol=SIMBOLO, timeframe=Timeframe.M15, take_ticks=20)
+
+    assert foto.bias == "SHORT"
+    assert foto.direction_source == "AISA_SENTIMENTO"
+
+
+def test_the_origin_reaches_the_indicator(logged_in, db_session) -> None:
+    _semeia(db_session)
+
+    dados = logged_in.get(
+        f"/dashboard/foto-analise/live?symbol={SIMBOLO}&timeframe=M15"
+    ).json()
+
+    assert "svg" in dados

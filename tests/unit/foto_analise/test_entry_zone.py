@@ -87,7 +87,7 @@ def test_an_isolated_band_is_still_a_region() -> None:
 
 
 def test_price_inside_the_zone_is_ready() -> None:
-    assert _zona(24584).status == EntryStatus.READY
+    assert _zona(24584).status == EntryStatus.IN_ZONE
 
 
 def test_price_above_a_buy_zone_means_wait() -> None:

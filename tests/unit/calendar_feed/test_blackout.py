@@ -207,12 +207,31 @@ def test_the_reason_uses_past_tense_after_the_release() -> None:
 
 
 def test_a_non_forex_six_letter_name_is_not_split_into_fake_currencies() -> None:
-    """"USTECH" nao e um par: dividir em "UST"/"ECH" faria o filtro
-    descartar eventos legitimos com base em siglas inventadas."""
-    assert currencies_for_symbol("USTECH") == frozenset()
+    """"COFFEE" nao e um par: dividir em "COF"/"FEE" faria o filtro
+    descartar eventos legitimos com base em siglas inventadas.
+
+    O exemplo era "USTECH" ate o indice USTEC entrar no catalogo: com
+    cinco letras, ele passou a casar como prefixo de qualquer simbolo
+    comecado por elas. O caso vale a pena ser conhecido e esta coberto
+    logo abaixo; aqui o que se protege e o caminho de divisao em seis
+    letras, que precisa de um nome que nao colida com o catalogo.
+    """
+    assert currencies_for_symbol("COFFEE") == frozenset()
+
+
+def test_a_catalog_prefix_wins_over_the_six_letter_split() -> None:
+    """Efeito colateral de USTEC ter cinco letras: "USTECH" e lido como o
+    indice com sufixo de corretora, nao como nome desconhecido.
+
+    E o mesmo mecanismo que faz "EURUSD.r" funcionar, e aqui ele acerta —
+    USTECH de fato e o mesmo indice em outras corretoras. Fica registrado
+    porque a leitura nao e obvia: o simbolo nao esta no catalogo, e mesmo
+    assim resolve.
+    """
+    assert currencies_for_symbol("USTECH") == frozenset({"USD"})
 
 
 def test_such_a_symbol_keeps_the_gate_conservative() -> None:
     assert find_blocking_event(
-        [evento(minutos=5, currency="USD")], symbol="USTECH", now=AGORA, window=JANELA
+        [evento(minutos=5, currency="USD")], symbol="COFFEE", now=AGORA, window=JANELA
     )

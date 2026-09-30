@@ -45,6 +45,8 @@ def serialize(foto: FotoAnalise) -> dict:
         "generated_at": foto.generated_at.isoformat(),
         "decision": foto.decision,
         "bias": foto.bias,
+        "direction_source": foto.direction_source,
+        "direction_rationale": foto.direction_rationale,
         "score": foto.score,
         "current_price": foto.current_price,
         "take_ticks": foto.take_ticks,

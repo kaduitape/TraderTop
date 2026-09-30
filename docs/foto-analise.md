@@ -64,6 +64,67 @@ aparecem como aviso.
 **A seta é tracejada.** É projeção do cenário analisado, não previsão.
 Sólida, leria como afirmação sobre o futuro.
 
+## Quem escolhe o lado (direção AUTO)
+
+A direção automática deixou de ser uma linha (`SHORT se tendência == DOWN`)
+e virou uma **cadeia de provedores** em `app/foto_analise/direction.py`:
+
+1. **`SentimentDirectionProvider`** — usa o sentimento agregado das notícias
+   da MarketPulse/AIsa. Acima de 58/100 puxa para compra, abaixo de 42 para
+   venda, no meio se cala. A margem de 8 pontos existe porque 52 contra 48
+   não é opinião, é ruído.
+2. **`TrendDirectionProvider`** — a regra de sempre. É o **piso de
+   comparação**, não um fallback temporário: se o sentimento não superar
+   isto, a resposta certa é continuar aqui.
+
+O primeiro com opinião decide. Um provedor ausente, sem chave ou fora do ar
+apenas se cala e o próximo responde — nada disso derruba a tela.
+
+### Lateral não vira compra
+
+Quando **ninguém** opina, a cadeia devolve `None` e a foto sai sem lado:
+`bias = NEUTRAL`, sem zona de entrada, sem stop, sem take, status
+`NO_TREND`. O mapa de calor continua na tela — ele não depende de direção —
+mas o painel diz que falta direção para um setup.
+
+Esse é o caso normal em mercado lateral, onde a heurística se cala por
+projeto. Escolher compra por ausência de sinal produziria um setup que
+ninguém defendeu, e ele chegaria à tela com a mesma aparência dos bons.
+
+O sentimento é a exceção que confirma a regra: ele **pode** dar lado em
+mercado lateral, porque aí há uma opinião afirmada, não um lado escolhido
+por falta de alternativa.
+
+### Custo: zero chamada nova
+
+`analyze_symbol` **já** consulta a AIsa em toda análise, e o resultado já vem
+no `AnalysisReport` como o fator `news` — atrás do CoverageGuard, do cache,
+do armazenamento e do teto diário. A cadeia lê esse fator; não faz requisição
+alguma.
+
+Isso não é detalhe de performance. Este projeto já queimou a assinatura
+inteira uma vez com uma consulta por ciclo que não virou nenhuma entrada;
+qualquer coisa que chame a AIsa de novo no laço do Pulso repetiria o
+episódio.
+
+### Onde ela não opina — que é a maior parte
+
+A AIsa cobre **ações e cripto**, não pares de moedas nem metais. Em XAUUSD,
+EURUSD e afins o `CoverageGuard` nem consulta, o fator vem sem dados e o
+provedor se cala: a direção continua vindo da tendência, exatamente como
+antes. O recurso só muda algo nos ativos que a API cobre.
+
+`has_data=False` cobre três situações que merecem o mesmo tratamento — sem
+chave, sem cobertura, API fora do ar. Nas três a AIsa não tem opinião, e
+"não sei" não pode virar 50: seria uma opinião neutra que ninguém emitiu.
+
+### Como medir se ajudou
+
+`direction_source` sai no resultado e nas duas APIs, com três valores:
+`OPERADOR`, `AISA_SENTIMENTO` e `TENDENCIA`. Trocar o decisor sem registrar
+qual foi usado tornaria impossível saber se a troca ajudou — e a decisão
+teria sido tomada no escuro.
+
 ## Atualidade dos dados
 
 A foto vale o que valem os candles no banco. Se o coletor MT5 parar, o

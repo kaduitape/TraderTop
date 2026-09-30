@@ -26,8 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from html import escape
 
-from app.foto_analise.entry_zone import EntryStatus
-from app.foto_analise.service import FotoAnalise
+from app.foto_analise.service import STATUS_LABELS, FotoAnalise
 
 WIDTH = 960
 HEIGHT = 520
@@ -349,12 +348,7 @@ class ChartAnnotationService:
         cor = "#22c55e" if comprando else "#ef4444"
         rotulo = "COMPRA" if comprando else "VENDA"
 
-        estado = {
-            EntryStatus.READY.value: "ENTRADA AGORA",
-            EntryStatus.WAIT_PULLBACK.value: "AGUARDAR PULLBACK",
-            EntryStatus.MISSED.value: "PRECO JA PASSOU",
-            EntryStatus.NO_SETUP.value: "SEM ENTRADA BOA AGORA",
-        }.get(foto.status, foto.status)
+        estado = STATUS_LABELS.get(foto.status, foto.status)
 
         return (
             f'<text x="{PADDING_LEFT}" y="20" fill="{cor}" font-size="17" '

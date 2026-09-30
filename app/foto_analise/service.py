@@ -20,6 +20,14 @@ from datetime import UTC, datetime
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from app.foto_analise.direction import (
+    SOURCE_MANUAL,
+    DirectionContext,
+    DirectionDecision,
+    FallbackDirectionProvider,
+    default_chain,
+    news_score_from,
+)
 from app.foto_analise.entry_zone import EntryStatus, EntryZone, EntryZoneEngine
 from app.foto_analise.heatmap import (
     HeatmapBand,
@@ -50,6 +58,27 @@ MAX_REASONS = 5
 """Cinco motivos e o limite pedido, e ele e uma decisao de leitura: uma
 lista de quinze fatores nao e mais informativa, e menos — ninguem lê
 quinze antes de operar."""
+
+
+STATUS_LABELS: dict[str, str] = {
+    "READY": "ENTRADA AGORA",
+    "CONFIRMATION_REQUIRED": "AGUARDANDO CONFIRMACAO",
+    EntryStatus.WAIT_PULLBACK.value: "AGUARDAR PULLBACK",
+    EntryStatus.MISSED.value: "PRECO JA PASSOU",
+    EntryStatus.NO_SETUP.value: "SEM ENTRADA BOA AGORA",
+    "NO_TREND": "SEM DIRECAO DEFINIDA",
+}
+"""Rotulo de tela para cada `FotoAnalise.status`.
+
+Uma tabela so, usada pela pagina e pelo SVG. Quando cada um tinha a sua,
+renomear um estado deixava a outra para tras — foi exatamente o que
+aconteceu com `READY`, e o sintoma foi a pagina inteira em erro 500.
+
+Note que as chaves NAO sao todas `EntryStatus`: `READY`,
+`CONFIRMATION_REQUIRED` e `NO_TREND` nascem em `_decide`, que sabe coisas
+que a zona nao sabe (a recomendacao da analise, a candle de confirmacao, a
+ausencia de direcao). `IN_ZONE` nao aparece de proposito: estar na faixa
+sempre vira `READY` ou `CONFIRMATION_REQUIRED` antes de chegar a tela."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +126,12 @@ class FotoAnalise:
     """CANDLE ou TICK. Um tick mais novo que a ultima candle fechada e o
     preco mais atual que este sistema tem — e a diferenca importa quando o
     operador compara a tela com o terminal."""
+    direction_source: str = ""
+    """Quem escolheu o lado: OPERADOR, AISA_SENTIMENTO ou TENDENCIA.
+
+    Sai no resultado porque trocar o decisor sem registrar qual foi usado
+    tornaria impossivel medir se a troca ajudou."""
+    direction_rationale: str = ""
     is_stale: bool = False
     """Dados velhos nao viram desenho silencioso.
 
@@ -126,10 +161,13 @@ class FotoAnaliseService:
         *,
         detail: HeatmapDetail = HeatmapDetail.NORMAL,
         candles_shown: int = 60,
+        directions: FallbackDirectionProvider | None = None,
     ) -> None:
         self._session = session
         self._detail = detail
         self._candles_shown = candles_shown
+        # Injetavel para o teste trocar o decisor sem rede nem banco.
+        self._directions = directions or default_chain()
 
     def build(
         self,
@@ -196,7 +234,8 @@ class FotoAnaliseService:
         )
 
         heatmap = OpportunityHeatmapEngine(detail=self._detail).build(entradas)
-        vies = self._resolve_bias(direction, report)
+        decisao_direcao = self._resolve_bias(direction, report, symbol)
+        vies = decisao_direcao.direction if decisao_direcao else None
         zona = (
             EntryZoneEngine().build(
                 heatmap,
@@ -243,6 +282,8 @@ class FotoAnaliseService:
             last_candle_at=candles[-1].time,
             data_age_minutes=idade,
             price_source=fonte_preco,
+            direction_source=decisao_direcao.source if decisao_direcao else "",
+            direction_rationale=decisao_direcao.rationale if decisao_direcao else "",
             is_stale=velho,
             price_at=preco_em,
             spread_ticks=spread_ticks,
@@ -414,25 +455,42 @@ class FotoAnaliseService:
 
     # --- decisao ----------------------------------------------------------
 
-    def _resolve_bias(self, direction: str, report: AnalysisReport) -> SignalDirection | None:
+    def _resolve_bias(
+        self, direction: str, report: AnalysisReport, symbol: str
+    ) -> DirectionDecision | None:
         """Direcao forcada pelo usuario vence a automatica — de proposito.
 
         Quem pede "so compra" quer ver a melhor compra possivel, mesmo em
         tendencia de baixa; esconder isso seria responder outra pergunta. O
         contexto adverso aparece nos motivos e no score, nao como recusa.
+
+        No modo AUTO a escolha passa pela cadeia de provedores: o
+        sentimento da AIsa opina quando tem dados, a tendencia decide o
+        resto. Devolve a DECISAO, nao so a direcao, para que a tela possa
+        dizer quem escolheu — trocar o decisor sem registrar qual foi
+        usado tornaria impossivel medir se a troca ajudou.
         """
         pedido = (direction or DIRECTION_AUTO).strip().upper()
         if pedido in {"COMPRA", "BUY", "LONG"}:
-            return SignalDirection.LONG
+            return DirectionDecision(
+                direction=SignalDirection.LONG,
+                source=SOURCE_MANUAL,
+                rationale="direcao escolhida pelo operador",
+            )
         if pedido in {"VENDA", "SELL", "SHORT"}:
-            return SignalDirection.SHORT
-        if report.trend == Trend.UP:
-            return SignalDirection.LONG
-        if report.trend == Trend.DOWN:
-            return SignalDirection.SHORT
-        # Nao escolher compra por omissao em mercado lateral. O painel ainda
-        # mostra o mapa, mas deixa claro que falta direcao para um setup.
-        return None
+            return DirectionDecision(
+                direction=SignalDirection.SHORT,
+                source=SOURCE_MANUAL,
+                rationale="direcao escolhida pelo operador",
+            )
+
+        return self._directions.decide(
+            DirectionContext(
+                symbol=symbol,
+                trend=report.trend.value,
+                news_score=news_score_from(report),
+            )
+        )
 
     def _decide(
         self,

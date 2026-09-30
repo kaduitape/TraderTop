@@ -148,6 +148,8 @@ def _payload(foto, *, enabled: bool) -> dict:
         "server_time": datetime.now(UTC).isoformat(),
         "decision": foto.decision,
         "bias": foto.bias,
+        "direction_source": foto.direction_source,
+        "direction_rationale": foto.direction_rationale,
         "status": foto.status,
         "score": foto.score,
         "price": foto.current_price,

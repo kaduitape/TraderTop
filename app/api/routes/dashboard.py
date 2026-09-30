@@ -2193,6 +2193,7 @@ def dashboard_foto_analise(
     from app.api.routes.foto_analise import FotoAnaliseIn, build_foto
     from app.foto_analise.annotations import ChartAnnotationService
     from app.foto_analise.entry_zone import EntryStatus
+    from app.foto_analise.service import STATUS_LABELS
 
     simbolos = SymbolRepository(db).list_active()
     escolhido = symbol or (simbolos[0].name if simbolos else None)
@@ -2235,13 +2236,14 @@ def dashboard_foto_analise(
         return templates.TemplateResponse(request, "dashboard/foto_analise.html", contexto)
 
     comprando = foto.bias == "LONG"
-    rotulos = {
-        EntryStatus.READY.value: ("ENTRADA AGORA", "text-success"),
-        EntryStatus.WAIT_PULLBACK.value: ("AGUARDAR PULLBACK", "text-warning"),
-        EntryStatus.MISSED.value: ("PRECO JA PASSOU", "text-warning"),
-        EntryStatus.NO_SETUP.value: ("SEM ENTRADA BOA AGORA", "text-danger"),
+    cores = {
+        "READY": "text-success",
+        EntryStatus.WAIT_PULLBACK.value: "text-warning",
+        EntryStatus.MISSED.value: "text-warning",
+        EntryStatus.NO_SETUP.value: "text-danger",
     }
-    status_label, status_class = rotulos.get(foto.status, (foto.status, "text-muted"))
+    status_label = STATUS_LABELS.get(foto.status, foto.status)
+    status_class = cores.get(foto.status, "text-muted")
 
     contexto.update(
         {
