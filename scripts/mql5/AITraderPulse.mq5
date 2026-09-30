@@ -380,12 +380,25 @@ string ReasonLabel(const string codigo)
 //| mesmo nome aparecer antes no JSON, buscar do inicio leria o valor  |
 //| errado em silencio.                                                |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Esquece a leitura da IA.                                          |
+//|                                                                   |
+//| Chamado tanto antes de reler quanto quando a conexao cai. No      |
+//| segundo caso e o comportamento desejado: sem servidor nao ha      |
+//| leitura atual, e uma leitura velha na tela nao se distingue de    |
+//| uma nova.                                                          |
+//+------------------------------------------------------------------+
+void ClearSignalAI()
+  {
+   g_ai_state   = "";
+   g_ai_conf    = 0.0;
+   g_ai_review  = false;
+   g_ai_reasons = "";
+  }
+
 void ParseSignalAI(const string json)
   {
-   g_ai_state      = "";
-   g_ai_conf       = 0.0;
-   g_ai_review     = false;
-   g_ai_reasons    = "";
+   ClearSignalAI();
 
    int bloco = StringFind(json, "\"signal_ai\"");
    if(bloco < 0)
@@ -466,6 +479,18 @@ void Fetch()
       // que se esvazia a cada oscilacao de conexao e pior que um que
       // mantem o ultimo cenario e avisa que ele envelheceu.
       g_last_ok = false;
+
+      // O rotulo da IA e a excecao a essa regra, e a diferenca e de
+      // especie. Zonas, stop e alvo sao NIVEIS: continuam onde estavam
+      // mesmo sem conexao, e envelhecem devagar. "STRONG_SETUP" e uma
+      // AFIRMACAO SOBRE AGORA — mantê-la na tela enquanto o servidor esta
+      // mudo e deixar uma leitura que ninguem esta mais sustentando com
+      // cara de leitura atual.
+      //
+      // A linha some inteira em vez de mudar de cor: um rotulo apagado e
+      // inequivoco, enquanto um cinza se confunde com o proprio WAIT.
+      ClearSignalAI();
+
       DrawPanel();
       ChartRedraw();
       return;
@@ -491,7 +516,7 @@ void Fetch()
    if(ShowSignalAI)
       ParseSignalAI(json);
    else
-      g_ai_state = "";
+      ClearSignalAI();
 
    if(g_version > CONTRACT_SUPPORTED)
      {

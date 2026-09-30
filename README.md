@@ -736,7 +736,11 @@ EA antigo ignora o bloco: o campo é aditivo e a versão do contrato não mudou.
 
 **Custo.** O veredito é reaproveitado enquanto a candle e o resumo técnico
 não mudam, então o indicador consultar a cada 15 s não vira uma chamada a
-cada 15 s. Detalhes em `docs/indicador-mt5.md`.
+cada 15 s.
+
+**Na desconexão o rótulo some do gráfico** — ao contrário das zonas, que o EA
+mantém de propósito. Um nível velho ainda é um nível; um veredito velho é uma
+afirmação sobre um agora que já passou. Detalhes em `docs/indicador-mt5.md`.
 
 ## Detecção de drift (Fase 13)
 

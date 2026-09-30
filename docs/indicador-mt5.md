@@ -192,6 +192,14 @@ Erro de rede **não apaga** o desenho anterior, de propósito: um gráfico que
 se esvazia a cada oscilação de conexão é pior que um que mantém o último
 cenário e avisa que ele envelheceu.
 
+**A linha da IA é a exceção — ela some na desconexão.** A diferença é de
+espécie: zonas, stop e alvo são *níveis*, continuam onde estavam mesmo sem
+conexão e envelhecem devagar. `STRONG_SETUP` é uma *afirmação sobre agora*, e
+mantê-la na tela enquanto o servidor está mudo deixaria uma leitura que
+ninguém mais sustenta com cara de leitura atual. Some inteira em vez de mudar
+de cor: rótulo apagado é inequívoco, cinza se confundiria com o próprio
+`WAIT`.
+
 ## A leitura do Jev (`signal_ai`)
 
 Camada **opcional e desligada por padrão**. Recebe o resumo técnico que o
@@ -327,7 +335,9 @@ ficavam para trás até o próximo ciclo.
 **Falha de rede espaça as tentativas** (dobra até 5 min, volta ao normal no
 primeiro sucesso) e **não apaga o desenho anterior**: um gráfico que se
 esvazia a cada oscilação de conexão é pior que um que mantém o último
-cenário e avisa que ele envelheceu.
+cenário e avisa que ele envelheceu. A única coisa que some é o rótulo da
+IA — um nível velho ainda é um nível, um veredito velho é uma afirmação
+sobre um agora que já passou.
 
 **Durante a consulta o botão espera.** `WebRequest` é síncrona e bloqueia a
 thread do EA; o clique não se perde, mas demora. O EA escreve "consultando o
