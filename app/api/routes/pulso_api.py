@@ -38,8 +38,9 @@ from app.database.repositories.audit_log_repository import AuditLogRepository
 from app.database.repositories.symbol_repository import SymbolRepository
 from app.database.session import get_db
 from app.foto_analise.heatmap import HeatmapDetail
-from app.foto_analise.service import FotoAnaliseService
+from app.foto_analise.service import STATUS_LABELS, FotoAnaliseService
 from app.foto_analise.toggle import load_analysis_toggle, set_symbol_enabled
+from app.jev.client import JevFailure
 from app.market.catalog import resolve_broker_symbol
 from app.market.multi_timeframe import ANALYSIS_TIMEFRAMES, SymbolNotFoundError
 from app.mt5.market_data import Timeframe
@@ -137,6 +138,43 @@ def _zonas(foto) -> list[dict]:
     return zonas
 
 
+def _signal_ai(foto) -> dict:
+    """O bloco opcional de classificacao visual.
+
+    Sai SEMPRE, inclusive quando o Jev esta desligado — com
+    `available: false`. Omitir o bloco faria o indicador nao distinguir
+    "voce nao ligou" de "este servidor e antigo", e as duas situacoes
+    pedem acoes diferentes de quem instalou.
+
+    Nenhum caminho daqui pode levantar excecao: esta camada e acessoria, e
+    o Pulso ja esta completo sem ela.
+    """
+    # Importado como MODULO, e resolvido a cada chamada, de proposito: o
+    # avaliador e escolhido em tempo de execucao a partir da configuracao,
+    # e um `from ... import get_pulse_assessor` no topo congelaria a
+    # referencia — o teste que troca o avaliador por um duble passaria a
+    # nao surtir efeito, sem falhar, que e a pior forma de um teste mentir.
+    from app.jev import factory
+    from app.jev.pulse_assessment import PulseAssessment, as_payload
+
+    instantaneo = foto.technical_snapshot
+    if instantaneo is None:
+        return as_payload(PulseAssessment.unavailable(JevFailure.NOT_CONFIGURED))
+
+    avaliador = factory.get_pulse_assessor()
+    if avaliador is None:
+        return as_payload(PulseAssessment.unavailable(JevFailure.DISABLED, snapshot=instantaneo))
+
+    return as_payload(avaliador.assess(instantaneo))
+
+
+def _signal_ai_desligado() -> dict:
+    """O bloco quando nem houve analise — a IA esta desligada para o simbolo."""
+    from app.jev.pulse_assessment import PulseAssessment, as_payload
+
+    return as_payload(PulseAssessment.unavailable(JevFailure.DISABLED))
+
+
 def _payload(foto, *, enabled: bool) -> dict:
     zona = foto.entry_zone
     return {
@@ -183,6 +221,10 @@ def _payload(foto, *, enabled: bool) -> dict:
             "Score e confluencia, nao probabilidade de lucro. "
             "Este indicador nao envia nem cancela ordens."
         ),
+        # Ultimo campo de proposito: o indicador antigo le por busca de
+        # string e ignora o que nao conhece, entao um bloco novo no fim nao
+        # muda nada para quem ainda nao atualizou o EA.
+        "signal_ai": _signal_ai(foto),
     }
 
 
@@ -199,17 +241,18 @@ def _headline(foto, enabled: bool) -> str:
         return f"{origem}: analise da IA DESLIGADA"
     if foto.is_stale:
         return f"{origem}: DADOS DESATUALIZADOS ({foto.data_age_minutes:.0f} min)"
-    estados = {
-        "READY": "ENTRADA AGORA",
-        "WAIT_PULLBACK": "AGUARDAR PULLBACK",
-        "MISSED": "PRECO JA PASSOU",
-        "NO_SETUP": "SEM ENTRADA BOA AGORA",
-    }
+
+    estado = STATUS_LABELS.get(foto.status, foto.status)
+
+    # Sem vies nao ha lado a anunciar. Dizer "VENDA" aqui — que era o que
+    # acontecia, porque o teste era `LONG senao VENDA` — poria a palavra
+    # VENDA na legenda de um mercado onde o sistema decidiu justamente que
+    # nao ha direcao.
+    if foto.bias not in ("LONG", "SHORT"):
+        return f"{origem} | SEM DIRECAO {foto.score:.0f}/100 — {estado}"
+
     lado = "COMPRA" if foto.bias == "LONG" else "VENDA"
-    return (
-        f"{origem} | {lado} {foto.score:.0f}/100 — "
-        f"{estados.get(foto.status, foto.status)}"
-    )
+    return f"{origem} | {lado} {foto.score:.0f}/100 — {estado}"
 
 
 def _desligado(symbol: str, timeframe: Timeframe) -> dict:
@@ -240,6 +283,11 @@ def _desligado(symbol: str, timeframe: Timeframe) -> dict:
         "reasons_against": [],
         "headline": f"{symbol} {timeframe.value}: analise da IA DESLIGADA",
         "disclaimer": "Este indicador nao envia nem cancela ordens.",
+        # Presente tambem aqui para que o bloco exista em TODA resposta do
+        # Pulso. Um campo que as vezes some obriga o indicador a tratar dois
+        # formatos, e e nesse "as vezes" que o parsing por busca de string
+        # erra em silencio.
+        "signal_ai": _signal_ai_desligado(),
     }
 
 

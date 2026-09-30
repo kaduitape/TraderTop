@@ -695,6 +695,49 @@ o sistema nunca apresenta dado velho como se fosse fresco.
 
 Ver `docs/dashboard.md` para autenticação, rotas e detalhes operacionais.
 
+## Leitura visual do Pulso com Jev/TypeSafe (opcional)
+
+Camada **desligada por padrão** que recebe o resumo técnico já calculado e
+devolve **um rótulo entre quatro** para o gráfico do MetaTrader:
+`STRONG_SETUP` (verde), `CAUTION` (amarelo), `WAIT` (cinza),
+`INSUFFICIENT_DATA` (laranja), mais um aviso de "confira antes de agir".
+
+Ela existe porque o operador hoje precisa cruzar sete números de cabeça para
+ler o conjunto. O que ela **não** faz: não gera preço, zona, entrada, stop,
+alvo, direção nem ordem. Esses valores continuam vindo exclusivamente do
+motor técnico determinístico, e nenhum deles chega a ser enviado — o resumo
+leva distâncias em percentual, nunca os níveis. Desligar o Jev não muda um
+número no gráfico.
+
+Não é previsão garantida, não é aconselhamento financeiro e não automatiza
+execução. A **confiança** devolvida mede o quanto o classificador se
+concentrou em um rótulo, não a chance de o trade dar lucro — a mesma ressalva
+que vale para o score, que é confluência.
+
+```bash
+JEV_ENABLED=false
+JEV_API_KEY=                 # só do ambiente: sem campo no painel, sem linha no banco
+JEV_API_BASE_URL=https://api.typesafe.ai/v1/systemone
+JEV_MODEL=jev-latest
+JEV_TIMEOUT_SECONDS=2.5
+JEV_CACHE_TTL_SECONDS=300
+```
+
+**Não reaproveite `AISA_API_KEY`** — são serviços distintos, e uma chave
+compartilhada faz o vazamento de um virar o vazamento dos dois.
+
+**Fallback.** Desligado, sem chave, indisponível, lento ou com resposta
+inválida, o Pulso responde igual, com a análise técnica inteira;
+`signal_ai.available` vem `false`, `confidence` vem `0` (nenhuma confiança é
+inventada) e o estado vem `INSUFFICIENT_DATA` — que é o rótulo honesto para
+"ninguém classificou", enquanto `CAUTION` seria um julgamento que nenhum
+modelo emitiu. Nada é bloqueado e nada é executado por causa da ausência. Um
+EA antigo ignora o bloco: o campo é aditivo e a versão do contrato não mudou.
+
+**Custo.** O veredito é reaproveitado enquanto a candle e o resumo técnico
+não mudam, então o indicador consultar a cada 15 s não vira uma chamada a
+cada 15 s. Detalhes em `docs/indicador-mt5.md`.
+
 ## Detecção de drift (Fase 13)
 
 Um modelo aprovado não fica bom para sempre. `monitor model` compara um
@@ -800,8 +843,9 @@ para as fases correspondentes.
   rotina de operação, checagens periódicas e resposta a incidentes
   (Fase 15).
 - `docs/indicador-mt5.md` — indicador (EA) que desenha as zonas do painel
-  no gráfico do MetaTrader, a API de chaves que o autentica e o botão de
-  ligar/desligar a análise da IA.
+  no gráfico do MetaTrader, a API de chaves que o autentica, o botão de
+  ligar/desligar a análise da IA e a camada opcional de classificação
+  visual Jev/TypeSafe (`signal_ai`).
 - `docs/foto-analise.md` — FotoAnálise: camada visual sobre a análise
   existente (mapa de calor de confluência, zona de entrada, sweet spot),
   o que reaproveita e por que o score não é probabilidade de lucro.

@@ -35,6 +35,7 @@ from app.foto_analise.heatmap import (
     HeatmapInputs,
     OpportunityHeatmapEngine,
 )
+from app.jev.snapshot import TechnicalSnapshot
 from app.market.multi_timeframe import build_multi_timeframe_snapshot
 from app.market.regimes import Trend
 from app.market.smc import (
@@ -152,6 +153,13 @@ class FotoAnalise:
     """Relacao bruta entre alvo e invalidacao, antes de comissoes."""
     setup_id: str = ""
     """Identifica um cenario para que o terminal nao repita alertas."""
+    technical_snapshot: TechnicalSnapshot | None = None
+    """Resumo tecnico fechado, para a camada opcional de classificacao visual.
+
+    Vive aqui porque este e o unico ponto onde o `AnalysisReport` e a foto
+    coexistem — montar o resumo depois obrigaria a rota a chamar
+    `analyze_symbol` de novo, e essa chamada custa credito de API. Ver
+    `app/jev/snapshot.py`."""
 
 
 class FotoAnaliseService:
@@ -284,6 +292,21 @@ class FotoAnaliseService:
             price_source=fonte_preco,
             direction_source=decisao_direcao.source if decisao_direcao else "",
             direction_rationale=decisao_direcao.rationale if decisao_direcao else "",
+            technical_snapshot=self._technical_snapshot(
+                report=report,
+                symbol=symbol,
+                timeframe=timeframe,
+                vies=vies,
+                status=status,
+                zona=zona,
+                stop=stop,
+                take=take,
+                idade=idade,
+                velho=velho,
+                spread_ticks=spread_ticks,
+                retorno_risco=retorno_risco,
+                candle_at=candles[-1].time,
+            ),
             is_stale=velho,
             price_at=preco_em,
             spread_ticks=spread_ticks,
@@ -454,6 +477,59 @@ class FotoAnaliseService:
         return compute_premium_discount(altos[-1], baixos[-1])
 
     # --- decisao ----------------------------------------------------------
+
+    def _technical_snapshot(
+        self,
+        *,
+        report: AnalysisReport,
+        symbol: str,
+        timeframe: Timeframe,
+        vies: SignalDirection | None,
+        status: str,
+        zona: EntryZone | None,
+        stop: float | None,
+        take: float | None,
+        idade: float | None,
+        velho: bool,
+        spread_ticks: float | None,
+        retorno_risco: float | None,
+        candle_at: datetime,
+    ) -> TechnicalSnapshot:
+        """O resumo fechado que a camada de classificacao visual consome.
+
+        Montado aqui porque este e o unico lugar onde o `AnalysisReport` e a
+        foto existem juntos. Refaze-lo na rota custaria outra
+        `analyze_symbol` — e essa chamada gasta credito de API externa.
+
+        Distancias saem em PERCENTUAL do preco, nao em ticks. Um resumo que
+        diz "stop a 40 ticks" nao e comparavel entre MNQ e EURUSD; "0.35%" e.
+        """
+        fatores = {fator.name: fator for fator in report.score.factors}
+        referencia = zona.sweet_spot if zona else 0.0
+
+        return TechnicalSnapshot(
+            symbol=symbol,
+            timeframe=timeframe.value,
+            direction=vies.value if vies is not None else "NONE",
+            score=report.score.total_score,
+            recommendation=report.recommendation,
+            technical_status=status,
+            trend=report.trend.value,
+            timeframe_trends={
+                tf.value: rotulo for tf, rotulo in report.multi_timeframe_alignment.items()
+            },
+            volume_score=_factor_score(fatores, "volume"),
+            liquidity_score=_factor_score(fatores, "liquidity"),
+            spread_ticks=spread_ticks,
+            data_age_minutes=idade,
+            is_stale=velho,
+            has_blockers=bool(report.rejection_reasons),
+            blocker_count=len(report.rejection_reasons),
+            entry_to_stop_pct=_distance_pct(referencia, stop),
+            entry_to_target_pct=_distance_pct(referencia, take),
+            risk_reward=retorno_risco,
+            candle_open_time=candle_at.isoformat(),
+        )
 
     def _resolve_bias(
         self, direction: str, report: AnalysisReport, symbol: str
@@ -730,3 +806,28 @@ def _round_to_tick(price: float, tick_size: float) -> float:
     if tick_size <= 0:
         return round(price, 8)
     return round(round(price / tick_size) * tick_size, 8)
+
+
+def _factor_score(fatores: dict, nome: str) -> float | None:
+    """O score bruto de um fator, ou None quando ele nao tem dados.
+
+    Ausencia continua ausencia: um fator sem dados vale None, nunca 50.
+    Cinquenta seria uma leitura neutra que ninguem emitiu, e ela chegaria
+    ao classificador como se fosse medicao.
+    """
+    fator = fatores.get(nome)
+    if fator is None or not getattr(fator, "has_data", True):
+        return None
+    return float(fator.raw_score)
+
+
+def _distance_pct(referencia: float, alvo: float | None) -> float | None:
+    """Distancia ate um nivel, em percentual do preco de referencia.
+
+    Percentual e nao ticks porque o resumo atravessa ativos: 40 ticks sao
+    10 pontos no MNQ e 0.0040 no EURUSD, e comparar os dois numeros crus
+    nao significa nada.
+    """
+    if alvo is None or referencia <= 0:
+        return None
+    return abs(alvo - referencia) / referencia * 100.0

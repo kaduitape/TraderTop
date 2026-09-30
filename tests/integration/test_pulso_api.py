@@ -388,6 +388,273 @@ def test_the_route_never_touches_orders() -> None:
         assert not any(m.startswith(proibido) for m in importados), proibido
 
 
+def test_the_jev_layer_never_touches_orders() -> None:
+    """A mesma garantia estrutural, agora para a camada de classificacao.
+
+    Ela e a parte do sistema que fala com um servico externo, entao e a
+    mais exposta a "so mais um passinho": receber um rotulo e executar em
+    cima dele. O pacote inteiro fica proibido de importar execucao — nao
+    por desconfianca de quem escreve, mas porque essa fronteira precisa
+    falhar no CI, e nao numa revisao que alguem pode pular.
+    """
+    import ast
+    import pathlib
+
+    for arquivo in sorted(pathlib.Path("app/jev").glob("*.py")):
+        arvore = ast.parse(arquivo.read_text())
+        importados: list[str] = []
+        for no in ast.walk(arvore):
+            if isinstance(no, ast.ImportFrom) and no.module:
+                importados.append(no.module)
+            elif isinstance(no, ast.Import):
+                importados.extend(alias.name for alias in no.names)
+
+        for proibido in (
+            "app.execution",
+            "app.paper_trading",
+            "app.mt5.orders",
+            "app.risk",
+            "app.broker",
+        ):
+            assert not any(m.startswith(proibido) for m in importados), f"{arquivo}: {proibido}"
+
+
+def test_the_indicator_source_sends_no_orders() -> None:
+    """O EA e um arquivo de texto que o operador compila — nao passa por
+    lint nem por revisao de tipo. A unica garantia possivel e esta: as
+    construcoes que enviam ordem no MQL5 nao existem no arquivo.
+
+    Os comentarios sao removidos antes da checagem: o cabecalho do EA cita
+    `OrderSend` e `CTrade` justamente para explicar que eles NAO estao la, e
+    um teste que casasse com essa frase proibiria documentar a garantia que
+    ele existe para cobrar.
+    """
+    import pathlib
+    import re
+
+    bruto = pathlib.Path("scripts/mql5/AITraderPulse.mq5").read_text()
+    sem_bloco = re.sub(r"/\*.*?\*/", "", bruto, flags=re.DOTALL)
+    fonte = re.sub(r"//[^\n]*", "", sem_bloco)
+
+    for proibido in (
+        "OrderSend",
+        "PositionOpen",
+        "PositionClose",
+        "CTrade",
+        "Trade\\Trade.mqh",
+        "MqlTradeRequest",
+        "OrderModify",
+        "OrderClose",
+    ):
+        assert proibido not in fonte, proibido
+
+
+# --- signal_ai: a camada opcional de classificacao visual -------------------
+
+
+def test_the_block_is_always_present_even_with_jev_off(client, db_session, chave) -> None:
+    """Um campo que as vezes some obriga o indicador a tratar dois
+    formatos, e e nesse "as vezes" que o parsing por busca de string erra
+    em silencio. Desligado, o bloco vem com available=false."""
+    _semeia(db_session)
+
+    dados = client.get(
+        f"/api/pulso?symbol={SIMBOLO}&timeframe=M15", headers=_cabecalho(chave)
+    ).json()
+
+    assert "signal_ai" in dados
+    assert dados["signal_ai"]["available"] is False
+
+
+def test_jev_off_invents_no_confidence(client, db_session, chave) -> None:
+    """Sem veredito, nenhum numero. Uma confianca inventada apareceria no
+    grafico identica a uma medida."""
+    _semeia(db_session)
+
+    bloco = client.get(
+        f"/api/pulso?symbol={SIMBOLO}&timeframe=M15", headers=_cabecalho(chave)
+    ).json()["signal_ai"]
+
+    assert bloco["confidence"] == 0.0
+    assert bloco["needs_review"] is False
+    assert bloco["state"] == "INSUFFICIENT_DATA"
+    assert bloco["model"] == ""
+
+
+def test_jev_off_does_not_turn_a_technical_read_into_a_strong_signal(
+    client, db_session, chave
+) -> None:
+    """O contrario do fallback silencioso: a ausencia do Jev nunca pode
+    promover o que o motor tecnico disse."""
+    _semeia(db_session)
+
+    bloco = client.get(
+        f"/api/pulso?symbol={SIMBOLO}&timeframe=M15", headers=_cabecalho(chave)
+    ).json()["signal_ai"]
+
+    assert bloco["state"] != "STRONG_SETUP"
+
+
+def test_the_old_contract_is_untouched_by_the_new_block(client, db_session, chave) -> None:
+    """Compatibilidade: nenhum campo antigo saiu nem mudou de tipo. Um EA
+    que ainda nao conhece `signal_ai` simplesmente o ignora."""
+    _semeia(db_session)
+
+    dados = client.get(
+        f"/api/pulso?symbol={SIMBOLO}&timeframe=M15", headers=_cabecalho(chave)
+    ).json()
+
+    antigos = {
+        "contract_version": int,
+        "enabled": bool,
+        "symbol": str,
+        "timeframe": str,
+        "decision": str,
+        "bias": str,
+        "status": str,
+        "score": float,
+        "price": float,
+        "tick_size": float,
+        "take_ticks": int,
+        "has_entry": bool,
+        "entry_min": float,
+        "entry_max": float,
+        "sweet_spot": float,
+        "distance_ticks": int,
+        "has_take": bool,
+        "take": float,
+        "has_stop": bool,
+        "stop": float,
+        "has_decision_level": bool,
+        "decision_level": float,
+        "is_stale": bool,
+        "zones": list,
+        "reasons_for": list,
+        "reasons_against": list,
+        "headline": str,
+        "disclaimer": str,
+    }
+    for campo, tipo in antigos.items():
+        assert campo in dados, campo
+        assert isinstance(dados[campo], tipo), f"{campo}: {type(dados[campo])}"
+
+    assert dados["contract_version"] == 1, "o contrato antigo nao mudou de versao"
+
+
+def test_a_jev_outage_does_not_break_the_route(client, db_session, chave, monkeypatch) -> None:
+    """Com o Jev LIGADO e fora do ar, a rota responde 200 com a analise
+    tecnica inteira. Esta camada e acessoria; derrubar a tela por causa
+    dela seria trocar uma melhoria visual por uma indisponibilidade."""
+    import httpx
+
+    from app.jev import factory
+    from app.jev.cache import TTLCache
+    from app.jev.client import JevClient
+    from app.jev.pulse_assessment import PulseAssessment, PulseAssessor
+
+    def fora_do_ar(request):
+        raise httpx.ConnectError("sem rota", request=request)
+
+    avaliador = PulseAssessor(
+        JevClient(api_key="k", transport=httpx.MockTransport(fora_do_ar)),
+        cache=TTLCache[PulseAssessment](ttl_seconds=300),
+    )
+    monkeypatch.setattr(factory, "get_pulse_assessor", lambda settings=None: avaliador)
+
+    _semeia(db_session)
+    resposta = client.get(
+        f"/api/pulso?symbol={SIMBOLO}&timeframe=M15", headers=_cabecalho(chave)
+    )
+
+    assert resposta.status_code == 200
+    dados = resposta.json()
+    assert dados["signal_ai"]["available"] is False
+    assert dados["signal_ai"]["confidence"] == 0.0
+    # A analise tecnica continua completa — nada foi perdido.
+    assert dados["score"] > 0
+    assert "zones" in dados
+
+
+def test_a_good_verdict_reaches_the_payload(client, db_session, chave, monkeypatch) -> None:
+    import httpx
+
+    from app.jev import factory
+    from app.jev.cache import TTLCache
+    from app.jev.client import JevClient
+    from app.jev.pulse_assessment import PulseAssessment, PulseAssessor
+
+    corpo = {
+        "model": "jev-1.13.0",
+        "answers": {
+            "pulse_state": {
+                "type": "choice",
+                "choice": "CAUTION",
+                "confidence": 0.74,
+                "probabilities": {"CAUTION": 0.74},
+            },
+            "needs_review": {"type": "noul", "noul": 0.81},
+        },
+    }
+    avaliador = PulseAssessor(
+        JevClient(api_key="k", transport=httpx.MockTransport(lambda r: httpx.Response(200, json=corpo))),
+        cache=TTLCache[PulseAssessment](ttl_seconds=300),
+    )
+    monkeypatch.setattr(factory, "get_pulse_assessor", lambda settings=None: avaliador)
+
+    _semeia(db_session)
+    bloco = client.get(
+        f"/api/pulso?symbol={SIMBOLO}&timeframe=M15", headers=_cabecalho(chave)
+    ).json()["signal_ai"]
+
+    assert bloco["available"] is True
+    assert bloco["state"] == "CAUTION"
+    assert bloco["confidence"] == 0.74
+    assert bloco["needs_review"] is True
+    assert bloco["model"] == "jev-1.13.0"
+    assert len(bloco["reason_codes"]) <= 3
+
+
+def test_no_secret_reaches_the_http_response(client, db_session, chave, monkeypatch) -> None:
+    """A chave do Jev nunca sai pela API — nem quando configurada, nem
+    dentro de uma mensagem de erro."""
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "jev_api_key", "sk-jev-segredo-do-usuario", raising=False)
+
+    _semeia(db_session)
+    bruto = client.get(
+        f"/api/pulso?symbol={SIMBOLO}&timeframe=M15", headers=_cabecalho(chave)
+    ).text
+
+    assert "sk-jev-segredo-do-usuario" not in bruto
+    assert "segredo" not in bruto.lower()
+
+
+def test_no_secret_reaches_the_logs(client, db_session, chave, monkeypatch, caplog) -> None:
+    import httpx
+
+    from app.jev import factory
+    from app.jev.cache import TTLCache
+    from app.jev.client import JevClient
+    from app.jev.pulse_assessment import PulseAssessment, PulseAssessor
+
+    caplog.set_level("DEBUG")
+    avaliador = PulseAssessor(
+        JevClient(
+            api_key="sk-jev-segredo-do-usuario",
+            transport=httpx.MockTransport(lambda r: httpx.Response(401, text="bad key")),
+        ),
+        cache=TTLCache[PulseAssessment](ttl_seconds=300),
+    )
+    monkeypatch.setattr(factory, "get_pulse_assessor", lambda settings=None: avaliador)
+
+    _semeia(db_session)
+    client.get(f"/api/pulso?symbol={SIMBOLO}&timeframe=M15", headers=_cabecalho(chave))
+
+    assert "sk-jev-segredo-do-usuario" not in caplog.text
+
+
 # --- a headline diz de onde vieram os numeros ------------------------------
 
 

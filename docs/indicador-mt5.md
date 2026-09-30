@@ -83,6 +83,7 @@ opera — mas porque com o botão desligado o terminal não executa EA nenhum.
 | `ZoneTransparency` | 0–100; a cor é misturada com o fundo do gráfico |
 | `AlertOnReady` | avisa quando o preço entra na zona |
 | `PushOnReady` | também envia push (exige MetaQuotes ID no terminal) |
+| `ShowSignalAI` | mostra a leitura do Jev, **quando o servidor enviar uma** |
 
 ### O sufixo da corretora erra em silêncio
 
@@ -164,6 +165,11 @@ o preço de hoje — e o gráfico não teria como saber.
 ## Segurança
 
 - A chave dá acesso a **ler análise** e ao liga/desliga do desenho. Nada além.
+- A `JEV_API_KEY` nunca sai deste servidor: não vai para o EA, não aparece na
+  resposta da API, não entra em log (nem dentro de mensagem de erro) e não
+  tem campo no painel. O que viaja até o Jev é só o resumo técnico — símbolo,
+  timeframe, scores e distâncias em percentual. Sem senha, sem token, sem
+  login MT5, sem ID de conta.
 - Revogar tem efeito imediato: a validação consulta o banco a cada requisição.
 - O segredo nunca volta pela API, nem no log de auditoria — o registro guarda
   só o prefixo (`tt_abcde…`), que identifica sem revelar.
@@ -186,11 +192,111 @@ Erro de rede **não apaga** o desenho anterior, de propósito: um gráfico que
 se esvazia a cada oscilação de conexão é pior que um que mantém o último
 cenário e avisa que ele envelheceu.
 
+## A leitura do Jev (`signal_ai`)
+
+Camada **opcional e desligada por padrão**. Recebe o resumo técnico que o
+motor local já calculou e devolve **um rótulo entre quatro**, mais um aviso
+de "confira antes de agir".
+
+| Rótulo | Cor no gráfico | O que quer dizer |
+|---|---|---|
+| `STRONG_SETUP` | verde | os sinais convergem, dados atuais, sem bloqueios |
+| `CAUTION` | amarelo | cenário legível, mas com conflito, spread ou volume ruim |
+| `WAIT` | cinza | pode vir a valer, ainda não vale |
+| `INSUFFICIENT_DATA` | laranja | não há base para classificar |
+
+### O que ela não faz
+
+Não gera preço, zona, entrada, stop, alvo, direção nem ordem. **Todos** esses
+valores continuam vindo exclusivamente do motor técnico local, e nenhum deles
+é sequer enviado ao Jev — o resumo leva distâncias em percentual, nunca os
+níveis. Desligar o Jev não muda um número no gráfico: só tira um rótulo
+colorido da legenda.
+
+Isso é desenho, não limitação temporária. Trocar parte de um motor
+determinístico e testável por um julgamento externo exigiria validação que
+este projeto não tem — não há backtest com custos aqui que sustentasse a
+troca.
+
+### "Confiança" não é chance de acerto
+
+A confiança é o quanto o classificador se concentrou em um rótulo — quanto
+ele hesitou entre as quatro opções. Confiança alta num `CAUTION` significa
+"tenho certeza de que é para ter cautela", e não "88% de chance de dar
+certo". Vale a mesma regra do score: **confluência, nunca probabilidade de
+lucro**.
+
+O aviso `[CONFERIR]` vem de uma pergunta separada, cuja resposta é uma
+probabilidade calibrada; ele aparece acima de 0,6 e pinta a linha de
+vermelho, porque um aviso em verde é lido como "tudo certo" pelo canto do
+olho.
+
+### Os motivos são locais, não texto do Jev
+
+Os `reason_codes` (`MTF_ALIGNED`, `SPREAD_WIDE`, …) são derivados da análise
+local, e o EA traduz cada código para um rótulo curto usando uma tabela que
+vive **dentro do próprio arquivo `.mq5`**. O servidor manda códigos de um
+conjunto fechado; o texto que aparece no gráfico está escrito no EA. Em
+nenhum momento o indicador exibe texto livre de origem externa.
+
+Cada código pode ser conferido contra o relatório — `MTF_ALIGNED` é
+verificável. Um código vindo do modelo seria uma afirmação sem lastro
+desenhada sobre o preço.
+
+### Configuração
+
+Todas no `.env`, nenhuma no painel:
+
+| Variável | Padrão | Para quê |
+|---|---|---|
+| `JEV_ENABLED` | `false` | liga a camada |
+| `JEV_API_KEY` | vazio | **só do ambiente** — não existe campo no painel nem no banco |
+| `JEV_API_BASE_URL` | `https://api.typesafe.ai/v1/systemone` | endpoint |
+| `JEV_MODEL` | `jev-latest` | modelo |
+| `JEV_TIMEOUT_SECONDS` | `2.5` | curto: o passo é acessório |
+| `JEV_CACHE_TTL_SECONDS` | `300` | teto de idade do veredito |
+
+A chave **não** é lida de `system_settings` e não aparece em nenhuma tela.
+Segredo guardado no banco ganha um segundo lugar de onde vazar (backup, dump,
+tela de configuração), e este não precisa disso. **Não reaproveite
+`AISA_API_KEY`**: são serviços distintos, e uma chave compartilhada faz o
+vazamento de um virar o vazamento dos dois.
+
+### Quantas chamadas isso custa
+
+Poucas. O veredito é reaproveitado enquanto **a candle e o resumo técnico não
+mudam** — a chave do cache é `símbolo + timeframe + abertura da candle +
+impressão digital do resumo`. Num gráfico de M15, isso é da ordem de 4
+chamadas por hora, não uma a cada 15 segundos.
+
+A impressão digital exclui o preço atual de propósito. Se ele entrasse, ela
+mudaria a cada tick, o cache nunca acertaria e cada refresh do indicador
+viraria uma chamada paga — que foi exatamente como a cota de outra API deste
+projeto foi esgotada uma vez.
+
+### Quando o Jev não responde
+
+Desligado, sem chave, indisponível, lento ou com resposta inválida, o
+comportamento é sempre o mesmo:
+
+- o Pulso responde **igual**, com a análise técnica inteira;
+- `signal_ai.available` vem `false` e `confidence` vem `0` — nenhuma
+  confiança é inventada;
+- o estado vem `INSUFFICIENT_DATA`, que é o rótulo honesto para "ninguém
+  classificou". `CAUTION` seria um julgamento que nenhum modelo emitiu;
+- os `reason_codes` **continuam saindo**, porque vêm da análise local;
+- nada é bloqueado e nada é executado por causa da ausência.
+
+Um EA antigo, que não conhece `signal_ai`, ignora o bloco e funciona como
+antes — o campo é aditivo e a versão do contrato não mudou.
+
 ## Limitação conhecida
 
 O score é **confluência**, não probabilidade de lucro — a mesma ressalva de
 `docs/foto-analise.md`, e o `disclaimer` vai no payload para que ela chegue
-junto com os números.
+junto com os números. A classificação do Jev é uma **leitura visual** do que
+já foi calculado: não é previsão garantida, não é aconselhamento financeiro e
+não automatiza execução.
 
 ## Alerta de entrada pronta
 

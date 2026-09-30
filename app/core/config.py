@@ -180,6 +180,39 @@ class Settings(BaseSettings):
     analysis_default_timeframe: str = "M15"
     analysis_default_threshold: float = 90.0
 
+    # --- Jev / TypeSafe: classificacao VISUAL do Pulso --------------------------
+    # Camada opcional que recebe um resumo tecnico JA CALCULADO e devolve um
+    # rotulo entre quatro (STRONG_SETUP / CAUTION / WAIT / INSUFFICIENT_DATA).
+    # Nao produz preco, zona, stop, take, direcao nem ordem: tudo isso continua
+    # vindo exclusivamente do motor tecnico local. Ver app/jev/ e
+    # docs/indicador-mt5.md.
+    jev_enabled: bool = False
+
+    jev_api_key: str | None = None
+    """Lida SOMENTE do ambiente.
+
+    Ao contrario de `aisa_api_key`, esta chave nao tem — e nao deve ganhar —
+    um campo equivalente em `system_settings`. Guardar segredo no banco cria
+    um segundo lugar de onde ele pode vazar (backup, dump, tela de
+    configuracao) e este nao precisa disso: quem opera a VPS ja edita o
+    `.env`. Reaproveitar `AISA_API_KEY` aqui tambem esta fora de questao —
+    sao servicos distintos, e uma chave compartilhada faz o vazamento de um
+    virar o vazamento dos dois."""
+
+    jev_api_base_url: str = "https://api.typesafe.ai/v1/systemone"
+    jev_model: str = "jev-latest"
+
+    jev_timeout_seconds: float = 2.5
+    """Curto de proposito. Este passo e ACESSORIO: o Pulso ja tem resposta
+    completa sem ele. Um timeout generoso transformaria uma melhoria visual
+    em atraso no desenho do grafico, que e o oposto do objetivo."""
+
+    jev_cache_ttl_seconds: float = 300.0
+    """Teto de idade da classificacao. O corte real e a candle: enquanto a
+    candle e o resumo tecnico nao mudam, a resposta e reaproveitada. Este
+    prazo so existe para que uma candle longa (H4, D1) nao congele o
+    veredito por horas."""
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def is_test_env(self) -> bool:

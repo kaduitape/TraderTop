@@ -58,9 +58,13 @@ input int    ZoneTransparency = 85;     // 0-100 (maior = mais transparente)
 input bool   AlertOnReady    = true;    // Avisar quando a entrada ficar pronta
 input bool   PushOnReady     = false;   // Tambem enviar push (MetaQuotes ID)
 
+//--- Classificacao visual (opcional, vem do servidor)
+input bool   ShowSignalAI    = true;    // Mostrar a leitura da IA, quando o servidor enviar
+
 #define PREFIX "AITP_"
 #define CONTRACT_SUPPORTED 1   // versao do contrato da API que este arquivo entende
 #define MAX_ZONES 64
+#define MAX_REASON_CODES 3     // quantos motivos cabem na legenda sem virar sujeira
 
 //--- Estado
 bool     g_enabled      = true;
@@ -78,6 +82,13 @@ string   g_error        = "";
 datetime g_last_fetch   = 0;
 string   g_symbol       = "";
 string   g_timeframe    = "";
+
+//--- Classificacao visual. Vazio = o servidor nao enviou, ou enviou
+//--- available=false. Os dois casos desenham a mesma coisa: nada.
+string   g_ai_state     = "";
+double   g_ai_conf      = 0.0;
+bool     g_ai_review    = false;
+string   g_ai_reasons   = "";
 
 //+------------------------------------------------------------------+
 //| Ciclo de vida                                                     |
@@ -289,6 +300,145 @@ bool JsonBool(const string json, const string chave, const int desde = 0)
   }
 
 //+------------------------------------------------------------------+
+//| Array de strings: ["A","B","C"]                                   |
+//|                                                                   |
+//| `JsonRaw` nao serve aqui. Diante de um `[`, ela cai no ramo        |
+//| numerico e para na primeira virgula, devolvendo `["A"` — lixo que  |
+//| pareceria um valor. Esta funcao le ate o `]` e extrai so o que     |
+//| esta entre aspas.                                                  |
+//+------------------------------------------------------------------+
+int JsonStrArray(const string json, const string chave, string &saida[],
+                 const int maximo, const int desde = 0)
+  {
+   ArrayResize(saida, 0);
+
+   string alvo = "\"" + chave + "\":";
+   int inicio = StringFind(json, alvo, desde);
+   if(inicio < 0)
+      return(0);
+
+   int abre = StringFind(json, "[", inicio);
+   int fecha = StringFind(json, "]", abre);
+   if(abre < 0 || fecha < 0)
+      return(0);
+
+   int achados = 0;
+   int cursor = abre + 1;
+   while(achados < maximo && cursor < fecha)
+     {
+      int aspa = StringFind(json, "\"", cursor);
+      if(aspa < 0 || aspa > fecha)
+         break;
+      int fim = StringFind(json, "\"", aspa + 1);
+      if(fim < 0 || fim > fecha)
+         break;
+
+      ArrayResize(saida, achados + 1);
+      saida[achados] = StringSubstr(json, aspa + 1, fim - aspa - 1);
+      achados++;
+      cursor = fim + 1;
+     }
+   return(achados);
+  }
+
+//+------------------------------------------------------------------+
+//| Rotulo curto de cada codigo de motivo.                            |
+//|                                                                   |
+//| A tabela vive AQUI, e nao vem do servidor, porque este EA nao      |
+//| exibe texto livre de origem externa. O servidor manda codigos de   |
+//| um conjunto fechado; o que aparece no grafico e escrito neste      |
+//| arquivo. Codigo desconhecido (servidor mais novo) e mostrado cru,  |
+//| que e feio mas honesto — melhor que sumir sem deixar rastro.       |
+//+------------------------------------------------------------------+
+string ReasonLabel(const string codigo)
+  {
+   if(codigo == "MTF_ALIGNED")         return("timeframes alinhados");
+   if(codigo == "MTF_CONFLICT")        return("timeframes em conflito");
+   if(codigo == "VOLUME_FAVORABLE")    return("volume favoravel");
+   if(codigo == "VOLUME_WEAK")         return("volume fraco");
+   if(codigo == "LIQUIDITY_FAVORABLE") return("liquidez favoravel");
+   if(codigo == "SPREAD_ACCEPTABLE")   return("spread aceitavel");
+   if(codigo == "SPREAD_WIDE")         return("spread alargado");
+   if(codigo == "DATA_STALE")          return("dados atrasados");
+   if(codigo == "BLOCKERS_PRESENT")    return("bloqueios ativos");
+   if(codigo == "NO_DIRECTION")        return("sem direcao definida");
+   if(codigo == "RR_FAVORABLE")        return("retorno/risco favoravel");
+   if(codigo == "RR_POOR")             return("retorno/risco ruim");
+   return(codigo);
+  }
+
+//+------------------------------------------------------------------+
+//| Le o bloco signal_ai, se o servidor mandar um.                    |
+//|                                                                   |
+//| Tolerante por desenho: servidor antigo nao tem o bloco, e nesse    |
+//| caso g_ai_state fica vazio e nada e desenhado. Nao ha versao de    |
+//| contrato nova por causa disto — o campo e aditivo, e exigir        |
+//| atualizacao do servidor para desenhar o que ja funcionava seria    |
+//| quebrar quem nao pediu nada.                                       |
+//|                                                                   |
+//| A busca comeca na POSICAO do bloco, nao em zero: se um campo de    |
+//| mesmo nome aparecer antes no JSON, buscar do inicio leria o valor  |
+//| errado em silencio.                                                |
+//+------------------------------------------------------------------+
+void ParseSignalAI(const string json)
+  {
+   g_ai_state      = "";
+   g_ai_conf       = 0.0;
+   g_ai_review     = false;
+   g_ai_reasons    = "";
+
+   int bloco = StringFind(json, "\"signal_ai\"");
+   if(bloco < 0)
+      return;   // servidor mais antigo: o resto do grafico segue igual
+
+   if(!JsonBool(json, "available", bloco))
+      return;
+
+   g_ai_state  = JsonRaw(json, "state", bloco);
+   g_ai_conf   = JsonNum(json, "confidence", bloco);
+   g_ai_review = JsonBool(json, "needs_review", bloco);
+
+   string codigos[];
+   int achados = JsonStrArray(json, "reason_codes", codigos, MAX_REASON_CODES, bloco);
+   for(int i = 0; i < achados; i++)
+     {
+      if(i > 0)
+         g_ai_reasons += ", ";
+      g_ai_reasons += ReasonLabel(codigos[i]);
+     }
+  }
+
+color AIStateColor()
+  {
+   if(g_ai_state == "STRONG_SETUP")      return(clrMediumSeaGreen);
+   if(g_ai_state == "CAUTION")           return(clrGold);
+   if(g_ai_state == "WAIT")              return(clrSilver);
+   if(g_ai_state == "INSUFFICIENT_DATA") return(clrDarkOrange);
+   return(clrLightGray);
+  }
+
+//+------------------------------------------------------------------+
+//| A linha de texto do bloco de IA.                                  |
+//|                                                                   |
+//| "confianca" aqui e o quanto o classificador se concentrou em um    |
+//| rotulo — NAO e chance de o trade dar lucro, e a palavra escolhida  |
+//| precisa deixar isso claro em um grafico onde tudo mais e preco.    |
+//+------------------------------------------------------------------+
+string AIStateLine()
+  {
+   if(StringLen(g_ai_state) == 0)
+      return("");
+
+   string linha = "IA: " + g_ai_state
+                  + "  (confianca na leitura " + DoubleToString(g_ai_conf * 100.0, 0) + "%)";
+   if(g_ai_review)
+      linha += "  [CONFERIR]";
+   if(StringLen(g_ai_reasons) > 0)
+      linha += "  - " + g_ai_reasons;
+   return(linha);
+  }
+
+//+------------------------------------------------------------------+
 //| Consulta e redesenho                                              |
 //+------------------------------------------------------------------+
 void Fetch()
@@ -335,6 +485,13 @@ void Fetch()
    // encolheria a area de risco em 25x, e ela continuaria parecendo certa.
    double tick = JsonNum(json, "tick_size");
    g_tick_size = (tick > 0.0) ? tick : _Point;
+
+   // Antes da checagem de versao: mesmo que o contrato esteja a frente e o
+   // desenho seja abortado, ter lido isto nao custa nada e nao atrapalha.
+   if(ShowSignalAI)
+      ParseSignalAI(json);
+   else
+      g_ai_state = "";
 
    if(g_version > CONTRACT_SUPPORTED)
      {
@@ -588,19 +745,41 @@ void DrawPanel()
    if(!ShowPanel)
       return;
 
-   string linhas[3];
+   // A linha da IA ocupa a terceira posicao quando existe, e some quando
+   // nao existe — em vez de ficar vazia. Uma linha em branco fixa no
+   // painel parece coisa quebrada.
+   string linhaIA = AIStateLine();
+   bool   temIA   = (StringLen(linhaIA) > 0);
+   int    total   = temIA ? 4 : 3;
+
+   string linhas[4];
+   color  cores[4];
+
    linhas[0] = g_headline;
+   cores[0]  = g_enabled ? clrWhite : clrSilver;
+
    linhas[1] = (StringLen(g_error) > 0) ? g_error : g_detail;
-   linhas[2] = (g_last_fetch > 0)
-               ? ("atualizado " + TimeToString(g_last_fetch, TIME_SECONDS))
-               : "sem resposta ainda";
+   cores[1]  = (StringLen(g_error) > 0) ? clrOrangeRed : clrLightGray;
 
-   color cores[3];
-   cores[0] = g_enabled ? clrWhite : clrSilver;
-   cores[1] = (StringLen(g_error) > 0) ? clrOrangeRed : clrLightGray;
-   cores[2] = g_last_ok ? clrMediumSeaGreen : clrOrangeRed;
+   int ultima = 1;
+   if(temIA)
+     {
+      ultima++;
+      linhas[ultima] = linhaIA;
+      // A cor e o estado: verde/amarelo/cinza/laranja. Quando ha aviso de
+      // conferencia, o vermelho vence — um [CONFERIR] em verde seria lido
+      // como "tudo certo" pelo canto do olho, que e como um painel de
+      // grafico e lido na maior parte do tempo.
+      cores[ultima] = g_ai_review ? clrOrangeRed : AIStateColor();
+     }
 
-   for(int i = 0; i < 3; i++)
+   ultima++;
+   linhas[ultima] = (g_last_fetch > 0)
+                    ? ("atualizado " + TimeToString(g_last_fetch, TIME_SECONDS))
+                    : "sem resposta ainda";
+   cores[ultima] = g_last_ok ? clrMediumSeaGreen : clrOrangeRed;
+
+   for(int i = 0; i < total; i++)
      {
       string nome = PREFIX + "panel" + IntegerToString(i);
       if(ObjectFind(0, nome) < 0)
@@ -614,6 +793,14 @@ void DrawPanel()
       ObjectSetInteger(0, nome, OBJPROP_FONTSIZE, (i == 0) ? 11 : 8);
       ObjectSetInteger(0, nome, OBJPROP_SELECTABLE, false);
      }
+
+   // O painel encolhe quando a linha da IA deixa de existir (servidor
+   // desligou o Jev, ou o operador desmarcou ShowSignalAI). Sem apagar as
+   // sobras, a linha antiga fica no grafico com o texto da ultima leitura
+   // — um veredito congelado, que e exatamente o tipo de coisa que alguem
+   // le como atual.
+   for(int i = total; i < 4; i++)
+      ObjectDelete(0, PREFIX + "panel" + IntegerToString(i));
   }
 
 void CreateToggleButton()
