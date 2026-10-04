@@ -23,7 +23,14 @@ from app.market.catalog import MARKET_CATALOG
 # Metais nao tem "moeda base" no sentido macro: XAU nao tem banco central.
 # O que move ouro e prata e a economia americana, entao o lado que importa
 # e o de cotacao.
-_NON_MONETARY_BASES = frozenset({"XAU", "XAG", "XPT", "XPD", "USTEC"})
+_NON_MONETARY_BASES = frozenset({"XAU", "XAG", "XPT", "XPD", "USTEC", "BTC", "ETH"})
+"""Bases que nao sao moeda e portanto nao tem agenda economica propria.
+
+Para elas o filtro considera so a moeda de cotacao. Sem BTC/ETH aqui,
+`currencies_for_symbol("BTCUSD")` cairia na divisao de seis letras, nao
+reconheceria "BTC" como moeda e devolveria vazio — ou seja, "nao sei
+filtrar", e o ativo passaria a ignorar ate os eventos do dolar, que o
+movem de verdade."""
 
 _CATALOG_BY_CODE = {item.code: item for item in MARKET_CATALOG}
 

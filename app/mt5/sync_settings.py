@@ -17,7 +17,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.database.repositories.system_setting_repository import SystemSettingRepository
-from app.market.catalog import MARKET_CATALOG
+from app.market.catalog import MARKET_CATALOG, resolve_broker_symbol
 
 MT5_SYNC_CONFIG_KEY = "mt5_auto_sync_config"
 MT5_SYNC_STATUS_KEY = "mt5_auto_sync_status"
@@ -222,3 +222,48 @@ def heartbeat_is_fresh(status: MT5SyncStatus, *, max_age_seconds: int = 90) -> b
     if heartbeat.tzinfo is None:
         heartbeat = heartbeat.replace(tzinfo=UTC)
     return (datetime.now(UTC) - heartbeat).total_seconds() <= max_age_seconds
+
+
+def stale_data_reason(session: Session, symbol: str) -> str:
+    """Por que ESTE simbolo pode estar sem candles novas.
+
+    Existe porque o aviso de dados velhos dizia uma frase so — "o coletor
+    MT5 provavelmente esta parado" — e essa frase manda o operador olhar a
+    tela do conector. Quando o conector esta online e saudavel, ele olha,
+    ve tudo verde, e nao tem para onde ir.
+
+    A causa mais comum nao e o coletor parado: e o simbolo nao estar na
+    lista que o worker sincroniza. Sao duas listas diferentes, e nada na
+    tela dizia isso. O seletor da FotoAnalise vem de `symbols` (o catalogo
+    inteiro da corretora, sincronizado de uma vez), enquanto o worker
+    percorre `config.symbols` (a selecao feita em Conexao MT5). Um ativo
+    pode estar no primeiro e fora do segundo para sempre.
+
+    Devolve texto vazio quando o simbolo ESTA coberto — nesse caso o
+    diagnostico antigo vale e o aviso generico continua certo.
+    """
+    config = load_sync_config(session)
+
+    coberto = any(
+        resolve_broker_symbol(codigo, [symbol]) is not None for codigo in config.symbols
+    )
+    if not coberto:
+        if symbol.strip().upper() not in _CATALOG_CODES and not any(
+            resolve_broker_symbol(codigo, [symbol]) is not None for codigo in _CATALOG_CODES
+        ):
+            return (
+                f"{symbol} nao faz parte do catalogo de ativos sincronizaveis, "
+                "entao o conector nunca o coleta — por mais saudavel que ele esteja."
+            )
+        return (
+            f"{symbol} nao esta na lista de ativos que o conector sincroniza. "
+            "Marque-o em Conexao MT5 > Mercados para que passe a ser coletado."
+        )
+
+    if not config.enabled:
+        return (
+            "A sincronizacao automatica esta pausada. Ative-a em Conexao MT5 "
+            "para o conector voltar a coletar."
+        )
+
+    return ""

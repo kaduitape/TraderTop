@@ -51,6 +51,7 @@ from app.market.structure import (
     label_swing_structure,
 )
 from app.mt5.market_data import Timeframe
+from app.mt5.sync_settings import stale_data_reason
 from app.services.analysis_service import AnalysisReport, analyze_symbol
 from app.strategies.base import SignalDirection
 
@@ -133,6 +134,12 @@ class FotoAnalise:
     Sai no resultado porque trocar o decisor sem registrar qual foi usado
     tornaria impossivel medir se a troca ajudou."""
     direction_rationale: str = ""
+    stale_reason: str = ""
+    """Por que os dados estao velhos, quando da para saber.
+
+    Vazio quando o simbolo esta coberto pela sincronizacao e ligado — ai o
+    diagnostico generico ("o coletor parou") e mesmo o mais provavel. Ver
+    `app.mt5.sync_settings.stale_data_reason`."""
     is_stale: bool = False
     """Dados velhos nao viram desenho silencioso.
 
@@ -218,6 +225,10 @@ class FotoAnaliseService:
             symbol, candles, agora, tick_size
         )
         idade, velho = self._data_age(preco_em, timeframe, agora)
+        # So consultado quando ja sabemos que os dados estao velhos: numa
+        # foto saudavel esta leitura seria uma ida ao banco por analise sem
+        # nada para dizer.
+        motivo_velho = stale_data_reason(self._session, symbol) if velho else ""
         features = primary.features if primary is not None else None
         atr = _last_float(features, "atr_14") or (current_price * 0.002)
 
@@ -286,7 +297,10 @@ class FotoAnaliseService:
             levels=self._levels(zona, stop, take, suportes, resistencias, nivel_decisao),
             reasons_for=favor,
             reasons_against=contra,
-            warnings=self._warnings(report, velho, idade, spread_ticks, take_ticks, retorno_risco),
+            warnings=self._warnings(
+                report, velho, idade, spread_ticks, take_ticks, retorno_risco, motivo_velho
+            ),
+            stale_reason=motivo_velho,
             last_candle_at=candles[-1].time,
             data_age_minutes=idade,
             price_source=fonte_preco,
@@ -408,14 +422,18 @@ class FotoAnaliseService:
         spread_ticks: float | None,
         take_ticks: int,
         risk_reward: float | None,
+        motivo_velho: str = "",
     ) -> list[str]:
         avisos: list[str] = []
         if velho:
             quanto = f"{idade:.0f} min" if idade is not None else "tempo desconhecido"
+            # O motivo ESPECIFICO vem antes do generico. "O coletor parou"
+            # e a causa menos provavel das tres, e era a unica que o aviso
+            # mencionava — mandando quem ve a tela conferir um conector que
+            # esta verde e funcionando.
             avisos.append(
                 f"DADOS DESATUALIZADOS: a candle mais recente tem {quanto}. "
-                "O coletor MT5 provavelmente esta parado — esta foto retrata o "
-                "passado, nao o mercado agora."
+                f"{motivo_velho or 'Esta foto retrata o passado, nao o mercado agora.'}"
             )
         avisos.extend(report.rejection_reasons)
         if spread_ticks is not None and spread_ticks >= take_ticks * 0.25:

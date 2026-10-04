@@ -100,7 +100,12 @@
             A candle mais recente de {{ foto.symbol }} tem
             <strong>{{ foto.data_age_minutes|round|int }} minutos</strong>
             ({{ foto.last_candle_at.strftime("%d/%m %H:%M") if foto.last_candle_at else "—" }}).
-            Esta foto retrata o passado — o coletor MT5 provavelmente está parado.
+            Esta foto retrata o passado.
+            {% if foto.stale_reason %}
+            {{ foto.stale_reason }}
+            {% else %}
+            O coletor MT5 provavelmente está parado.
+            {% endif %}
             Verifique em <a href="/dashboard/mt5">Conexão MT5</a>.
         </span>
     </div>

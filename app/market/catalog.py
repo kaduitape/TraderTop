@@ -12,7 +12,7 @@ from typing import Literal
 
 from app.database.models.symbol import Symbol
 
-MarketGroup = Literal["MAJORS", "CROSSES", "EXOTICS", "METALS", "INDICES"]
+MarketGroup = Literal["MAJORS", "CROSSES", "EXOTICS", "METALS", "INDICES", "CRYPTO"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +74,18 @@ MARKET_CATALOG: tuple[MarketInstrument, ...] = (
     MarketInstrument(
         "USTEC", "US Tech 100 Index", "INDICES", "USTEC", "USD", "bi-graph-up-arrow"
     ),
+    # Cripto. Nao estar aqui nao impedia o simbolo de existir no banco — o
+    # catalogo da corretora e sincronizado inteiro e BTCUSDm aparecia no
+    # seletor da FotoAnalise normalmente. Impedia outra coisa, e em
+    # silencio: `load_sync_config` descarta todo codigo fora deste catalogo,
+    # entao o worker nunca coletava o ativo. O painel oferecia um simbolo
+    # que ele proprio nunca manteria atualizado.
+    #
+    # Como o indice, estas nao sao moedas: o calendario economico considera
+    # apenas os eventos do dolar (ver `_NON_MONETARY_BASES`). Nao existe
+    # agenda de indicadores do Bitcoin.
+    MarketInstrument("BTCUSD", "Bitcoin / Dolar", "CRYPTO", "BTC", "USD", "bi-currency-bitcoin"),
+    MarketInstrument("ETHUSD", "Ethereum / Dolar", "CRYPTO", "ETH", "USD", "bi-currency-bitcoin"),
 )
 
 GROUP_LABELS: dict[MarketGroup, str] = {
@@ -82,6 +94,7 @@ GROUP_LABELS: dict[MarketGroup, str] = {
     "CROSSES": "Pares cruzados",
     "EXOTICS": "Pares exoticos",
     "INDICES": "Índices",
+    "CRYPTO": "Cripto",
 }
 
 
@@ -132,6 +145,7 @@ def grouped_availability(
         "CROSSES": [],
         "EXOTICS": [],
         "INDICES": [],
+        "CRYPTO": [],
     }
     for availability in catalog_availability(symbols):
         grouped[availability.instrument.group].append(availability)
