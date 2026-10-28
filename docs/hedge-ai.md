@@ -306,11 +306,18 @@ no painel e sem linha no banco.
 
 ## Instalação no MetaTrader
 
-1. Arquivo → Abrir pasta de dados → `MQL5`.
-2. Copie:
+1. No painel, **Hedge AI → Conexões e chaves → Baixar tudo (.zip)**. Ele
+   já vem com a estrutura de pastas montada. Os arquivos também podem ser
+   baixados um a um, e estão no repositório em `scripts/mql5/`.
+2. Arquivo → Abrir pasta de dados, e descompacte o ZIP ali (ele contém a
+   pasta `MQL5/`, que se funde com a existente):
    - `TraderTopHedgeConnector.mq5` → `MQL5/Experts/`
    - `TraderTopHedgeIndicator.mq5` → `MQL5/Indicators/`
-   - `Include/TraderTop/*.mqh` → `MQL5/Include/TraderTop/`
+   - `HedgeChannel.mqh`, `HedgeJson.mqh` → `MQL5/Include/TraderTop/`
+
+   A estrutura importa: um `.mqh` fora de `Include/TraderTop/` não é
+   encontrado pelo `#include`, e o erro de compilação não diz onde ele
+   deveria estar.
 3. Compile os dois no MetaEditor (**F7**).
 4. Ferramentas → Opções → Expert Advisors → marque **"Permitir WebRequest
    para as URLs listadas"** e adicione `https://trader-top.navit.com.br`.

@@ -463,6 +463,48 @@
                 </section>
 
                 <section class="card mt-4">
+                    <div class="card-header"><i class="bi bi-download me-2"></i>Baixar os arquivos MQL5</div>
+                    <div class="card-body">
+                        <a class="btn btn-primary w-100 mb-3" href="/dashboard/hedge/download">
+                            <i class="bi bi-file-earmark-zip me-1"></i>Baixar tudo (.zip, com as pastas prontas)
+                        </a>
+                        <p class="form-text mt-0">
+                            O ZIP já vem com a estrutura <code>MQL5/Experts</code>,
+                            <code>MQL5/Indicators</code> e <code>MQL5/Include/TraderTop</code>.
+                            Um <code>.mqh</code> na pasta errada não é encontrado pelo
+                            <code>#include</code>, e o erro de compilação não diz onde ele deveria estar.
+                        </p>
+                        <div class="list-group list-group-flush small">
+                            <a class="list-group-item list-group-item-action bg-transparent d-flex justify-content-between"
+                               href="/dashboard/hedge/download/connector">
+                                <span><i class="bi bi-file-earmark-code me-2"></i>TraderTopHedgeConnector.mq5</span>
+                                <code class="text-muted">Experts/</code>
+                            </a>
+                            <a class="list-group-item list-group-item-action bg-transparent d-flex justify-content-between"
+                               href="/dashboard/hedge/download/indicator">
+                                <span><i class="bi bi-file-earmark-code me-2"></i>TraderTopHedgeIndicator.mq5</span>
+                                <code class="text-muted">Indicators/</code>
+                            </a>
+                            <a class="list-group-item list-group-item-action bg-transparent d-flex justify-content-between"
+                               href="/dashboard/hedge/download/channel">
+                                <span><i class="bi bi-file-earmark-text me-2"></i>HedgeChannel.mqh</span>
+                                <code class="text-muted">Include/TraderTop/</code>
+                            </a>
+                            <a class="list-group-item list-group-item-action bg-transparent d-flex justify-content-between"
+                               href="/dashboard/hedge/download/json">
+                                <span><i class="bi bi-file-earmark-text me-2"></i>HedgeJson.mqh</span>
+                                <code class="text-muted">Include/TraderTop/</code>
+                            </a>
+                        </div>
+                        <p class="form-text mb-0">
+                            Servidos por este painel, não pelo GitHub: a versão entregue aqui é sempre
+                            a que conversa com <strong>este</strong> servidor. Baixar de outro lugar
+                            abre espaço para um conector de uma versão e uma API de outra.
+                        </p>
+                    </div>
+                </section>
+
+                <section class="card mt-4">
                     <div class="card-header"><i class="bi bi-pc-display me-2"></i>Configurar no MetaTrader</div>
                     <div class="card-body small">
                         <ol class="ps-3">

@@ -366,3 +366,98 @@ def test_the_jev_tab_states_observation_mode(logged_in) -> None:
 
     assert "observação" in html or "observacao" in html
     assert "não altera as probabilidades" in html or "nao altera as probabilidades" in html
+
+
+# --- download dos fontes MQL5 ----------------------------------------------
+
+
+def test_the_zip_carries_the_four_files_in_the_right_folders(logged_in) -> None:
+    """A estrutura e o ponto: um `.mqh` fora de Include/TraderTop/ nao e
+    encontrado pelo `#include`, e o erro de compilacao nao diz onde ele
+    deveria estar."""
+    import io
+    import zipfile
+
+    resposta = logged_in.get("/dashboard/hedge/download")
+
+    assert resposta.status_code == 200
+    assert resposta.headers["content-type"] == "application/zip"
+    assert "TraderTopHedge-MQL5.zip" in resposta.headers["content-disposition"]
+
+    with zipfile.ZipFile(io.BytesIO(resposta.content)) as zf:
+        nomes = set(zf.namelist())
+
+    assert nomes == {
+        "MQL5/Experts/TraderTopHedgeConnector.mq5",
+        "MQL5/Indicators/TraderTopHedgeIndicator.mq5",
+        "MQL5/Include/TraderTop/HedgeChannel.mqh",
+        "MQL5/Include/TraderTop/HedgeJson.mqh",
+        "LEIA-ME.txt",
+    }
+
+
+def test_the_zip_contents_match_the_sources(logged_in) -> None:
+    """Entregar o arquivo errado seria pior que nao entregar: o operador
+    compila, anexa, e o erro aparece como schema incompativel."""
+    import io
+    import pathlib
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(logged_in.get("/dashboard/hedge/download").content)) as zf:
+        entregue = zf.read("MQL5/Experts/TraderTopHedgeConnector.mq5").decode()
+
+    original = pathlib.Path("scripts/mql5/TraderTopHedgeConnector.mq5").read_text()
+    assert entregue == original
+
+
+def test_the_readme_warns_about_the_three_silent_failures(logged_in) -> None:
+    """URL nao liberada, AutoTrading desligado e Strategy Tester. As tres
+    falham sem mensagem util no terminal."""
+    import io
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(logged_in.get("/dashboard/hedge/download").content)) as zf:
+        leiame = zf.read("LEIA-ME.txt").decode()
+
+    assert "WebRequest" in leiame
+    assert "4014" in leiame
+    assert "AutoTrading" in leiame
+    assert "Strategy Tester" in leiame
+    assert "NAO ENVIA ORDENS" in leiame
+
+
+@pytest.mark.parametrize(
+    ("qual", "nome"),
+    [
+        ("connector", "TraderTopHedgeConnector.mq5"),
+        ("indicator", "TraderTopHedgeIndicator.mq5"),
+        ("channel", "HedgeChannel.mqh"),
+        ("json", "HedgeJson.mqh"),
+    ],
+)
+def test_each_file_downloads_on_its_own(logged_in, qual: str, nome: str) -> None:
+    resposta = logged_in.get(f"/dashboard/hedge/download/{qual}")
+
+    assert resposta.status_code == 200
+    assert nome in resposta.headers["content-disposition"]
+    assert len(resposta.content) > 500
+
+
+def test_an_unknown_file_is_refused(logged_in) -> None:
+    assert logged_in.get("/dashboard/hedge/download/../../etc/passwd").status_code == 404
+    assert logged_in.get("/dashboard/hedge/download/qualquer").status_code == 404
+
+
+def test_the_download_needs_a_login(client) -> None:
+    """Os fontes nao sao segredo, mas a rota nao tem por que ser publica —
+    e a sessao ja existe em todo caminho que leva ate ela."""
+    resposta = client.get("/dashboard/hedge/download", follow_redirects=False)
+
+    assert resposta.status_code in (302, 303, 401, 403)
+
+
+def test_the_panel_offers_the_download(logged_in) -> None:
+    html = logged_in.get("/dashboard/hedge").text
+
+    assert "/dashboard/hedge/download" in html
+    assert "Baixar tudo" in html

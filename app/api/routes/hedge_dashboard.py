@@ -14,12 +14,15 @@ novo, um vazamento do banco tambem conseguiria.
 
 from __future__ import annotations
 
+import io
+import zipfile
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.api_token import (
@@ -409,3 +412,155 @@ def hedge_key_revoke(
     )
     db.commit()
     return _voltar("Chave revogada. O conector para na proxima consulta.", ancora="#chaves")
+
+
+# --- download dos fontes MQL5 ----------------------------------------------
+#
+# Servidos pelo painel, e nao pelo GitHub, porque quem instala esta com o
+# painel aberto na frente — e porque a versao entregue aqui e sempre a que
+# conversa com ESTE servidor. Baixar de outro lugar abre espaco para um
+# conector de uma versao e uma API de outra, e a divergencia aparece como
+# erro 409 de schema no meio do pregao.
+
+MQL5_FILES = {
+    "connector": ("TraderTopHedgeConnector.mq5", "Experts"),
+    "indicator": ("TraderTopHedgeIndicator.mq5", "Indicators"),
+    "channel": ("Include/TraderTop/HedgeChannel.mqh", "Include/TraderTop"),
+    "json": ("Include/TraderTop/HedgeJson.mqh", "Include/TraderTop"),
+}
+
+
+def _mql5_root() -> Path:
+    """Raiz de `scripts/mql5`, resolvida a partir deste arquivo.
+
+    Nao usa o diretorio de trabalho: no container o processo sobe em `/app`
+    e em desenvolvimento na raiz do repositorio, e um caminho relativo daria
+    404 em um dos dois.
+    """
+    return Path(__file__).resolve().parents[3] / "scripts" / "mql5"
+
+
+def _ausente(nome: str) -> HTTPException:
+    # Estado real: a imagem foi construida sem `scripts/mql5`. Dizer isso e
+    # melhor que um 500 — o proximo passo e reconstruir, nao depurar.
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=(
+            f"{nome} nao esta nesta instalacao. A imagem foi construida sem "
+            "scripts/mql5 — rode `docker compose build app`."
+        ),
+    )
+
+
+@router.get("/dashboard/hedge/download/{qual}")
+def hedge_download_file(
+    qual: str,
+    _user: User = Depends(get_current_user_for_web),
+) -> FileResponse:
+    """Um arquivo por vez, para quem prefere copiar na mao."""
+    entrada = MQL5_FILES.get(qual)
+    if entrada is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"arquivo desconhecido: {qual}"
+        )
+
+    relativo, _pasta = entrada
+    caminho = _mql5_root() / relativo
+    if not caminho.is_file():
+        raise _ausente(relativo)
+
+    nome = caminho.name
+    return FileResponse(
+        caminho,
+        media_type="text/plain; charset=utf-8",
+        filename=nome,
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
+
+
+@router.get("/dashboard/hedge/download")
+def hedge_download_zip(
+    _user: User = Depends(get_current_user_for_web),
+) -> Response:
+    """Os quatro arquivos num ZIP, ja com a estrutura de pastas do MQL5.
+
+    Existe porque baixar quatro arquivos soltos e depois adivinhar em qual
+    pasta cada um vai e o passo onde a instalacao erra: `.mqh` em
+    `Experts/` nao e encontrado pelo `#include`, e o sintoma e um erro de
+    compilacao que nao diz onde o arquivo deveria estar.
+
+    Montado em memoria: sao quatro arquivos de texto, e gravar em disco
+    criaria um arquivo temporario por download para limpar depois.
+    """
+    raiz = _mql5_root()
+    faltando = [rel for rel, _ in MQL5_FILES.values() if not (raiz / rel).is_file()]
+    if faltando:
+        raise _ausente(", ".join(faltando))
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for relativo, pasta in MQL5_FILES.values():
+            caminho = raiz / relativo
+            zf.writestr(f"MQL5/{pasta}/{caminho.name}", caminho.read_text(encoding="utf-8"))
+        zf.writestr("LEIA-ME.txt", _LEIAME)
+
+    buffer.seek(0)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="TraderTopHedge-MQL5.zip"'
+        },
+    )
+
+
+_LEIAME = """TraderTop Hedge AI - arquivos para o MetaTrader 5
+=================================================
+
+ONDE COLOCAR
+------------
+Abra o MetaTrader, Arquivo > Abrir pasta de dados. Isso abre uma pasta que
+contem a pasta MQL5. Copie o conteudo do ZIP PARA DENTRO dela, mantendo a
+estrutura:
+
+    MQL5/Experts/TraderTopHedgeConnector.mq5
+    MQL5/Indicators/TraderTopHedgeIndicator.mq5
+    MQL5/Include/TraderTop/HedgeChannel.mqh
+    MQL5/Include/TraderTop/HedgeJson.mqh
+
+A estrutura importa: um .mqh fora de Include/TraderTop/ nao e encontrado
+pelo #include, e o erro de compilacao nao diz onde ele deveria estar.
+
+COMPILAR
+--------
+Abra os dois .mq5 no MetaEditor e pressione F7 em cada um. Os .mqh nao se
+compilam sozinhos - eles sao incluidos pelos outros dois.
+
+ANTES DE ANEXAR, TRES COISAS QUE FALHAM EM SILENCIO
+---------------------------------------------------
+1. Libere a URL do painel em Ferramentas > Opcoes > Expert Advisors >
+   "Permitir WebRequest para as URLs listadas". Sem isso o WebRequest
+   devolve -1 com erro 4014 e nada aparece. E a causa numero um de
+   "nao funciona".
+2. Ligue o AutoTrading. O conector NAO opera - mas com o botao desligado
+   o terminal nao executa EA nenhum.
+3. O Strategy Tester nao executa WebRequest. Testar o conector ali devolve
+   sempre -1. Use conta demo real.
+
+ANEXAR
+------
+- Conector (Experts): informe ApiKey e SetupId. Pode ficar num grafico
+  separado, se o principal ja tem outro EA.
+- Indicador (Indicators): mesmo SetupId, no grafico que voce quer ver.
+- Se estiverem em graficos diferentes, informe o MESMO ChartIdOverride
+  nos dois - senao cada um usa o id do proprio grafico e eles falam em
+  espacos diferentes do canal local.
+
+A CHAVE
+-------
+Cole-a no campo ApiKey do EA, no proprio terminal. NAO a salve em arquivos
+.set, perfis ou templates que voce compartilhe: eles viajam em claro.
+
+ESTE CONECTOR NAO ENVIA ORDENS. Ele le cotacao, consulta o painel e
+publica o resultado para o indicador desenhar.
+"""
