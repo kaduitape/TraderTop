@@ -387,10 +387,19 @@ ligado, (3) `SetupId` existe e é seu, (4) aba **Experts** do terminal.
 - **Nenhum modelo treinado.** O que há é um baseline teórico, declarado
   como tal na API e na tela. As probabilidades não foram validadas contra
   o comportamento deste ativo.
-- **Os `.mq5` não foram compilados** neste ambiente (sem MetaEditor). A
-  verificação feita foi balanceamento de delimitadores com lexer próprio e
-  a garantia estrutural de ausência de ordens. **A compilação permanece
-  pendente — o F7 é do operador.**
+- **Os `.mq5` não foram compilados.** O compilador MQL5 é proprietário e
+  só existe dentro do MetaEditor (Windows); não há alternativa aberta, e o
+  CDN da MetaQuotes está bloqueado pela política de rede do ambiente de
+  build. **A compilação permanece pendente — o F7 é do operador.**
+
+  O que roda no CI é `scripts/mql5_check.py`, um verificador estático que
+  cobre a família de erros que mais escapa sem compilador: delimitador
+  desbalanceado, chamada a função inexistente, número errado de argumentos,
+  `#include` não resolvido, campo de struct inexistente e função duplicada.
+  Ele **não** é um compilador — não verifica tipos nem conhece a API
+  inteira. Passar nele significa que essa família de erros não está
+  presente, nada além. Dez testes provam que ele falha quando deveria,
+  mutando os fontes de propósito.
 - **O risco de base é apontado, não medido.** O sistema avisa que dois
   instrumentos diferentes podem descolar; não estima quanto.
 - **`tick_value` vem do terminal**, não do banco: depende da conta logada
