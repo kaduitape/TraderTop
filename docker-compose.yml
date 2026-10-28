@@ -105,6 +105,34 @@ services:
       CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY:-}
       AISA_API_KEY: ${AISA_API_KEY:-}
       AISA_API_BASE_URL: ${AISA_API_BASE_URL:-}
+      # Tetos da MarketPulse. Sem eles aqui, os valores do .env eram
+      # ignorados e o container ficava preso no default -- numa API paga
+      # que este projeto ja esgotou uma vez, o teto precisa ser ajustavel
+      # de onde se administra o servidor.
+      NEWS_CACHE_TTL_SECONDS: ${NEWS_CACHE_TTL_SECONDS:-600}
+      NEWS_DAILY_CALL_BUDGET: ${NEWS_DAILY_CALL_BUDGET:-300}
+      # Calendario economico. O arquivo e exportado por um EA no terminal
+      # Windows, entao na VPS ele so existe se alguem o colocar la e
+      # montar o diretorio. Passar as variaveis nao cria o arquivo -- so
+      # torna a configuracao possivel, que hoje nem era.
+      CALENDAR_FILE_PATH: ${CALENDAR_FILE_PATH:-}
+      CALENDAR_BLACKOUT_BEFORE_MINUTES: ${CALENDAR_BLACKOUT_BEFORE_MINUTES:-30}
+      CALENDAR_BLACKOUT_AFTER_MINUTES: ${CALENDAR_BLACKOUT_AFTER_MINUTES:-15}
+      CALENDAR_MIN_IMPACT: ${CALENDAR_MIN_IMPACT:-HIGH}
+      CALENDAR_CACHE_TTL_SECONDS: ${CALENDAR_CACHE_TTL_SECONDS:-900}
+      CALENDAR_MAX_AGE_HOURS: ${CALENDAR_MAX_AGE_HOURS:-36}
+      CALENDAR_BLOCK_WHEN_UNAVAILABLE: ${CALENDAR_BLOCK_WHEN_UNAVAILABLE:-false}
+      # Jev/TypeSafe. Este compose NAO usa `env_file`: so o que esta
+      # listado aqui chega ao container. Sem estas linhas a chave ficaria
+      # no .env sem efeito nenhum, e o painel diria "desligado" sem
+      # explicar por que -- o pior tipo de falha de configuracao.
+      JEV_ENABLED: ${JEV_ENABLED:-false}
+      JEV_API_KEY: ${JEV_API_KEY:-}
+      JEV_API_BASE_URL: ${JEV_API_BASE_URL:-https://api.typesafe.ai/v1/systemone}
+      JEV_MODEL: ${JEV_MODEL:-jev-latest}
+      JEV_TIMEOUT_SECONDS: ${JEV_TIMEOUT_SECONDS:-2.5}
+      JEV_CACHE_TTL_SECONDS: ${JEV_CACHE_TTL_SECONDS:-300}
+      JEV_DAILY_CALL_BUDGET: ${JEV_DAILY_CALL_BUDGET:-200}
       RUN_PREFLIGHT: ${RUN_PREFLIGHT:-true}
     extra_hosts:
       # Permite apontar a ponte do MetaTrader para `host.docker.internal`

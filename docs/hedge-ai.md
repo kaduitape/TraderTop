@@ -299,8 +299,35 @@ SHA-256 no banco, prefixo `tt_` visível para identificar sem revelar.
 arquivos `.set`, perfis ou templates compartilhados — eles viajam em claro.
 Uma chave por máquina: perder o notebook custa revogar uma só.
 
-A chave do **JEV** fica só no backend (`JEV_API_KEY` no `.env`), sem campo
-no painel e sem linha no banco.
+### A chave do JEV: onde colocar
+
+Fica só no backend, no **`.env` da VPS** (`/var/www/trader-top/.env`). Não
+há campo no painel nem linha no banco, de propósito.
+
+```bash
+ssh <usuario>@<vps>
+cd /var/www/trader-top
+nano .env                   # JEV_ENABLED=true  e  JEV_API_KEY=<sua chave>
+docker compose up -d app    # recria o container com o ambiente novo
+```
+
+`docker compose restart` **não** basta: ele reinicia o processo com o
+ambiente antigo. É preciso `up -d`, que recria o container.
+
+Conferir sem expor a chave:
+
+```bash
+docker compose exec app python -c \
+  "from app.core.config import get_settings as g; s=g(); print(s.jev_enabled, bool(s.jev_api_key))"
+```
+
+Deve imprimir `True True`. Em **Hedge AI → JEV** o painel passa a mostrar
+"ligado" e o consumo do dia.
+
+> **O `docker-compose.yml` não usa `env_file`:** ele lista as variáveis uma
+> a uma. Uma variável ausente dessa lista fica no `.env` sem efeito nenhum,
+> e o painel diz "desligado" sem explicar por quê. `tests/unit/test_compose_env.py`
+> falha quando alguém documenta uma configuração que o container nunca verá.
 
 ---
 
