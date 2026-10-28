@@ -13,6 +13,9 @@
     <a class="tp-nav-link {% if request.url.path == '/dashboard/pulso' %}active{% endif %}" href="/dashboard/pulso">
         <i class="bi bi-broadcast"></i><span>Pulso ao Vivo</span><span class="tp-nav-chip">LIVE</span>
     </a>
+    <a class="tp-nav-link {% if request.url.path.startswith('/dashboard/hedge') %}active{% endif %}" href="/dashboard/hedge">
+        <i class="bi bi-shield-shaded"></i><span>Hedge AI</span><span class="tp-nav-chip">MESA</span>
+    </a>
     <a class="tp-nav-link {% if request.url.path == '/dashboard/markets' %}active{% endif %}" href="/dashboard/markets">
         <i class="bi bi-globe-americas"></i><span>Mercados</span>
     </a>

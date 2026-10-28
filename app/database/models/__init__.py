@@ -8,6 +8,12 @@ from app.database.models.audit_log import AuditLog
 from app.database.models.candle import Candle
 from app.database.models.data_quality_event import DataQualityEvent
 from app.database.models.drift_event import DriftEvent
+from app.database.models.hedge import (
+    HedgeAnalysis,
+    HedgeSession,
+    HedgeSetup,
+    HedgeSetupVersion,
+)
 from app.database.models.live_trade import LiveTrade
 from app.database.models.mt5_credential import Mt5Credential
 from app.database.models.paper_trade import PaperTrade
@@ -23,6 +29,10 @@ __all__ = [
     "Candle",
     "DataQualityEvent",
     "DriftEvent",
+    "HedgeAnalysis",
+    "HedgeSession",
+    "HedgeSetup",
+    "HedgeSetupVersion",
     "LiveTrade",
     "Mt5Credential",
     "PaperTrade",

@@ -15,6 +15,8 @@ from app.api.routes import (
     dashboard,
     foto_analise,
     health,
+    hedge_api,
+    hedge_dashboard,
     mt5_settings,
     pulso_api,
     web_auth,
@@ -55,6 +57,8 @@ def create_app() -> FastAPI:
     app.include_router(mt5_settings.router)
     app.include_router(foto_analise.router)
     app.include_router(pulso_api.router)
+    app.include_router(hedge_api.router)
+    app.include_router(hedge_dashboard.router)
 
     return app
 

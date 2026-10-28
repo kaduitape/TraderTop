@@ -1,0 +1,343 @@
+{
+  "_leia_me": [
+    "Exemplos do contrato /api/v1/hedge. Nenhum segredo real aqui: a chave",
+    "aparece como 'tt_EXEMPLO...' e deve ser substituida pela sua.",
+    "",
+    "A chave viaja SEMPRE no header X-API-Key, nunca na URL."
+  ],
+
+  "POST /api/v1/hedge/snapshot": {
+    "request": {
+      "headers": {
+        "X-API-Key": "tt_EXEMPLO_substitua_pela_sua_chave",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "schema_version": 1,
+        "setup_id": 7,
+        "terminal_id": "51234567",
+        "chart_id": "132456789012345",
+        "symbol": "MNQZ5",
+        "sequence": 412,
+        "captured_at": "2026-10-28T14:03:21+00:00",
+        "server_time": "2026-10-28T11:03:21+00:00",
+        "bid": 20412.25,
+        "ask": 20412.5,
+        "connector_version": "1.0.0",
+        "tick_value": 0.5,
+        "tick_size": 0.25,
+        "point": 0.01,
+        "volume_min": 0.01,
+        "volume_max": 100.0,
+        "volume_step": 0.01,
+        "contract_size": 1.0,
+        "account_currency": "USD",
+        "spread": 0.25,
+        "tick_volume": 318,
+        "atr": 11.75,
+        "atr_period_seconds": 900,
+        "setup_version": null
+      },
+      "_notas": [
+        "tick_value vem de SYMBOL_TRADE_TICK_VALUE no terminal: depende da",
+        "conta logada e do cambio do momento, e o servidor nao tem como",
+        "saber. Sem ele o bloco 'financial' sai indisponivel.",
+        "",
+        "atr_period_seconds e obrigatorio junto com atr: ATR(14) em M15 e em",
+        "M1 sao numeros diferentes, e sem a escala nao da para projetar.",
+        "",
+        "tick_volume e real_volume sao campos SEPARADOS de proposito: em",
+        "forex o primeiro e contagem de cotacoes, nao quantidade negociada."
+      ]
+    },
+
+    "response_200_completa": {
+      "schema_version": 1,
+      "setup_id": 7,
+      "setup_version": 2,
+      "session_key": "9f1c...64 hex...",
+      "sequence": 412,
+      "state": "CONNECTED",
+      "state_reason": "",
+      "closed_reason": "",
+      "objective": "FAVOR_BROKER_PROFIT",
+      "mode": "TRACKING",
+      "levels": {
+        "is_long": true,
+        "entry": "20400.00",
+        "take": "20500.00",
+        "stop": "20350.00",
+        "unit": "PRICE"
+      },
+      "price": {
+        "current": "20412.375",
+        "bid": "20412.25",
+        "ask": "20412.50",
+        "feed": "MT5"
+      },
+      "deadline": {
+        "seconds_remaining": 2180,
+        "deadline_utc": "2026-10-28T14:39:41+00:00",
+        "display_timezone": "America/Sao_Paulo"
+      },
+      "colors": {
+        "take_region": "RED",
+        "stop_region": "GREEN",
+        "take_above": "true"
+      },
+      "forecast": {
+        "available": true,
+        "reason": "",
+        "model_kind": "THEORETICAL_BASELINE",
+        "model_version": "baseline-2barrier-1.0.0",
+        "feed": "MT5",
+        "take_first": 0.2614,
+        "stop_first": 0.3907,
+        "no_barrier": 0.3479,
+        "take_first_pct": 26,
+        "stop_first_pct": 39,
+        "no_barrier_pct": 35,
+        "confidence": null,
+        "valid_until": "2026-10-28T14:03:31+00:00",
+        "assumptions": [
+          "Passeio aleatorio sem tendencia (nao incorpora direcao do mercado).",
+          "Volatilidade constante no horizonte, estimada do ATR ou dos retornos.",
+          "Movimento continuo: gaps podem pular uma barreira sem toca-la.",
+          "A divisao entre take e stop usa a proporcao de horizonte infinito.",
+          "Derivado de hipoteses, nao de frequencias medidas neste ativo."
+        ],
+        "notes": []
+      },
+      "financial": {
+        "available": true,
+        "currency": "USD",
+        "requested_lots": "1.0000",
+        "effective_lots": "1.00",
+        "desk_exposure": "2.00",
+        "broker_exposure": "2.00",
+        "residual_exposure": "0.00",
+        "coverage_ratio": "1.0000",
+        "basis_risk": false,
+        "mapping_note": "",
+        "scenarios": {
+          "DESK_TAKE": {
+            "desk_price": "20500.00",
+            "broker_price": "20500.00",
+            "desk_gross": "200.00",
+            "broker_gross": "-200.00",
+            "desk_costs": "4.00",
+            "broker_costs": "7.00",
+            "net": "-11.00"
+          },
+          "DESK_STOP": {
+            "desk_price": "20350.00",
+            "broker_price": "20350.00",
+            "desk_gross": "-100.00",
+            "broker_gross": "100.00",
+            "desk_costs": "4.00",
+            "broker_costs": "7.00",
+            "net": "-11.00"
+          },
+          "TIMEOUT": {
+            "desk_price": "20412.375",
+            "broker_price": "20412.375",
+            "desk_gross": "24.75",
+            "broker_gross": "-24.75",
+            "desk_costs": "4.00",
+            "broker_costs": "7.00",
+            "net": "-11.00"
+          }
+        },
+        "warnings": []
+      },
+      "jev": {
+        "state": "",
+        "confidence": null,
+        "observation_only": true
+      },
+      "analysis_valid_until": "2026-10-28T14:03:31+00:00",
+      "warnings": [],
+      "disclaimer": "Classificacao e probabilidades sao estimativas do modelo declarado, nao garantia de resultado. Este conector nao envia ordens.",
+
+      "_notas": [
+        "As tres probabilidades somam 1; os inteiros _pct somam 100 por",
+        "maior resto. Formatar no MQL5 exigiria replicar a regra, e duas",
+        "implementacoes divergem.",
+        "",
+        "Os tres cenarios dao o mesmo liquido porque a cobertura e perfeita:",
+        "o que sobra e o custo das duas pontas. Cobrir nao e de graca."
+      ]
+    },
+
+    "response_200_sem_previsao": {
+      "_quando": "Sem ATR com escala temporal, ou sem retornos suficientes.",
+      "schema_version": 1,
+      "setup_id": 7,
+      "state": "MODEL_UNAVAILABLE",
+      "state_reason": "Previsao indisponivel.",
+      "forecast": {
+        "available": false,
+        "reason": "INSUFFICIENT_DATA",
+        "model_kind": "THEORETICAL_BASELINE",
+        "model_version": "baseline-2barrier-1.0.0",
+        "take_first": null,
+        "stop_first": null,
+        "no_barrier": null,
+        "take_first_pct": null,
+        "stop_first_pct": null,
+        "no_barrier_pct": null,
+        "confidence": null,
+        "assumptions": [],
+        "notes": [
+          "Sem ATR com escala temporal nem retornos suficientes para estimar volatilidade."
+        ]
+      },
+      "financial": {
+        "available": true,
+        "currency": "USD",
+        "effective_lots": "1.00"
+      },
+      "_notas": [
+        "null, NUNCA zero. Zero significaria 'estimamos que nao acontece',",
+        "que e uma afirmacao diferente de 'nao ha estimativa'.",
+        "",
+        "O bloco financial continua disponivel: as camadas degradam de forma",
+        "independente."
+      ]
+    },
+
+    "response_200_sem_financeiro": {
+      "_quando": "tick_value ausente ou zero no snapshot.",
+      "state": "CONNECTED",
+      "forecast": { "available": true, "take_first_pct": 26 },
+      "financial": {
+        "available": false,
+        "reason": "Dados insuficientes para calcular: MNQZ5: tick_value ausente ou zero",
+        "warnings": []
+      }
+    },
+
+    "response_200_encerrada": {
+      "_quando": "Barreira tocada por preco executavel, ou prazo esgotado.",
+      "state": "CLOSED",
+      "state_reason": "Barreira atingida: DESK_TAKE.",
+      "closed_reason": "DESK_TAKE",
+      "deadline": { "seconds_remaining": 0 },
+      "forecast": {
+        "available": false,
+        "reason": "BARRIER_HIT",
+        "take_first": null,
+        "stop_first": null,
+        "no_barrier": null
+      },
+      "_notas": [
+        "Depois disto a previsao esta encerrada. Os ciclos seguintes",
+        "respondem CLOSED, e o conector para de consultar.",
+        "",
+        "Comprado, o toque e julgado pelo BID; vendido, pelo ASK. Usar o",
+        "meio declararia barreira tocada antes de o preco de saida chegar."
+      ]
+    },
+
+    "erros": {
+      "401": {
+        "detail": "Chave de API ausente ou invalida. Envie o header X-API-Key.",
+        "_nota": "Mensagem unica para ausente, malformada e revogada."
+      },
+      "403": {
+        "detail": "Esta chave nao tem permissao para este recurso.",
+        "_nota": "Escopo faltando, ou chave sem dono (falha fechado)."
+      },
+      "404": {
+        "detail": "Setup nao encontrado.",
+        "_nota": "IDENTICO para setup inexistente e setup de outro usuario: distinguir contaria a uma chave vazada quais ids existem."
+      },
+      "409": {
+        "detail": "Conector fala o schema 2; este servidor fala 1. Atualize o EA conector.",
+        "_nota": "O EA e compilado na maquina do operador; atualizar o servidor nao atualiza o terminal."
+      },
+      "422": { "detail": "bid e ask precisam ser positivos, com ask >= bid." },
+      "429": { "detail": "Limite de snapshots por segundo atingido para esta chave." }
+    }
+  },
+
+  "GET /api/v1/hedge/ping": {
+    "response_200": {
+      "schema_version": 1,
+      "ok": true,
+      "token_name": "Conector do notebook",
+      "token_prefix": "tt_EXEMP",
+      "scopes": ["hedge:analysis", "hedge:setup:read", "hedge:telemetry"],
+      "user_id": 3,
+      "server_time": "2026-10-28T14:03:21+00:00"
+    },
+    "_nota": "O prefixo identifica QUAL chave esta em uso sem revelar o segredo."
+  },
+
+  "GET /api/v1/hedge/setups": {
+    "response_200": {
+      "schema_version": 1,
+      "setups": [
+        {
+          "setup_id": 7,
+          "name": "Cobertura MNQ manha",
+          "version": 2,
+          "mode": "TRACKING",
+          "objective": "FAVOR_BROKER_PROFIT",
+          "closed": false,
+          "closed_reason": "",
+          "desk_symbol": "MNQ",
+          "broker_symbol": "MNQZ5",
+          "is_long": true,
+          "entry": "20400.00",
+          "take": "20500.00",
+          "stop": "20350.00",
+          "data_max_age_seconds": 30
+        }
+      ]
+    },
+    "_nota": "Somente os setups do dono da chave."
+  },
+
+  "GET /api/v1/hedge/history/7?limit=2": {
+    "response_200": {
+      "schema_version": 1,
+      "setup_id": 7,
+      "closed_reason": "",
+      "scenarios": ["DESK_TAKE", "DESK_STOP", "TIMEOUT"],
+      "items": [
+        {
+          "id": 1402,
+          "setup_version": 2,
+          "sequence": 412,
+          "captured_at": "2026-10-28T14:03:21+00:00",
+          "current_price": "20412.375",
+          "model_kind": "THEORETICAL_BASELINE",
+          "model_version": "baseline-2barrier-1.0.0",
+          "forecast_available": true,
+          "unavailable_reason": "",
+          "take_first": 0.2614,
+          "stop_first": 0.3907,
+          "no_barrier": 0.3479,
+          "financial_available": true
+        },
+        {
+          "id": 1401,
+          "setup_version": 2,
+          "sequence": 411,
+          "captured_at": "2026-10-28T14:03:19+00:00",
+          "current_price": "20412.00",
+          "model_kind": "THEORETICAL_BASELINE",
+          "model_version": "baseline-2barrier-1.0.0",
+          "forecast_available": false,
+          "unavailable_reason": "INSUFFICIENT_DATA",
+          "take_first": null,
+          "stop_first": null,
+          "no_barrier": null,
+          "financial_available": true
+        }
+      ]
+    },
+    "_nota": "As linhas sem previsao ficam registradas: um historico que so guarda acertos nao serve para medir calibracao."
+  }
+}

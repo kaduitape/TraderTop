@@ -850,6 +850,10 @@ para as fases correspondentes.
   no gráfico do MetaTrader, a API de chaves que o autentica, o botão de
   ligar/desligar a análise da IA e a camada opcional de classificação
   visual Jev/TypeSafe (`signal_ai`).
+- `docs/hedge-ai.md` — Hedge AI: cobertura mesa × corretora, motor
+  financeiro (ponto/tick/contrato/lote), probabilidade de qual barreira vem
+  primeiro, contrato da API versionada e os dois arquivos MQL5 (EA conector
+  + indicador). Exemplos em `docs/hedge-api-exemplos.json`.
 - `docs/foto-analise.md` — FotoAnálise: camada visual sobre a análise
   existente (mapa de calor de confluência, zona de entrada, sweet spot),
   o que reaproveita e por que o score não é probabilidade de lucro.

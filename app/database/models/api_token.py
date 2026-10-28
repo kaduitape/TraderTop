@@ -70,6 +70,19 @@ class ApiToken(Base, TimestampMixin):
 
     request_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    scopes: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    """Permissoes, separadas por virgula. Vazio = a chave legada, que so
+    alcanca o Pulso.
+
+    Lista explicita em vez de "pode tudo" porque a chave do conector Hedge
+    mora num terminal MetaTrader de um cliente — uma maquina que este
+    projeto nao administra. Se ela vazar, o que ela alcanca precisa ser o
+    minimo: telemetria, leitura de setup e analise. Nunca ordem, nunca
+    mudanca de modo, nunca setup de outro usuario."""
+
+    def has_scope(self, scope: str) -> bool:
+        return scope in {s.strip() for s in self.scopes.split(",") if s.strip()}
+
     def __repr__(self) -> str:
         # Sem hash, sem prefixo completo: `repr` acaba em log com facilidade.
         return f"ApiToken(id={self.id!r}, name={self.name!r}, active={self.is_active!r})"

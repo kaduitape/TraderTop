@@ -1,0 +1,650 @@
+{% extends "base.html" %}
+{% block title %}Hedge AI — AI Trader PRO{% endblock %}
+{% block content %}
+<section class="tp-analysis-shell tp-hedge">
+
+    <header class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+        <div>
+            <span class="tp-eyebrow"><i class="bi bi-shield-shaded me-2"></i>Cobertura mesa × corretora</span>
+            <h1 class="display-6 fw-bold mb-0">Hedge AI</h1>
+        </div>
+        <span class="tp-status-pill">
+            <span class="tp-live-dot {% if rows %}tp-dot-success{% else %}tp-dot-warning{% endif %}"></span>
+            {{ rows|length }} setup(s)
+        </span>
+    </header>
+
+    {% if saved %}
+    <div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>{{ saved }}</div>
+    {% endif %}
+    {% if error %}
+    <div class="tp-sync-error mb-4"><i class="bi bi-exclamation-octagon"></i><span>{{ error }}</span></div>
+    {% endif %}
+
+    {% if new_key %}
+    <div class="alert alert-warning">
+        <h5 class="alert-heading"><i class="bi bi-key me-2"></i>Guarde esta chave agora</h5>
+        <p class="mb-2">Ela aparece <strong>uma única vez</strong>. O servidor guarda só um hash —
+           se você perder, não há recuperação: gere outra.</p>
+        <code class="user-select-all d-block p-2 bg-dark rounded">{{ new_key }}</code>
+        <hr>
+        <p class="mb-0 small">
+            Cole no campo <code>ApiKey</code> do EA conector, no próprio terminal.
+            <strong>Não</strong> a inclua em arquivos <code>.set</code>, perfis ou templates que você
+            compartilhe — eles viajam em claro junto com o resto da configuração.
+        </p>
+    </div>
+    {% endif %}
+
+    <ul class="nav nav-tabs mb-4" role="tablist">
+        {% for aba, rotulo, icone in [
+            ('visao',  'Visão geral',       'bi-grid-1x2'),
+            ('setups', 'Setups',            'bi-sliders'),
+            ('chaves', 'Conexões e chaves', 'bi-key'),
+            ('vivo',   'Ao vivo',           'bi-broadcast'),
+            ('hist',   'Histórico',         'bi-clock-history'),
+            ('jev',    'JEV',               'bi-cpu')
+        ] %}
+        <li class="nav-item" role="presentation">
+            <button class="nav-link {% if loop.first %}active{% endif %}" data-bs-toggle="tab"
+                    data-bs-target="#tab-{{ aba }}" type="button" role="tab">
+                <i class="bi {{ icone }} me-1"></i>{{ rotulo }}
+            </button>
+        </li>
+        {% endfor %}
+    </ul>
+
+    <div class="tab-content">
+
+    {# ---------- 1. visão geral ---------- #}
+    <div class="tab-pane fade show active" id="tab-visao" role="tabpanel">
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-lg-3">
+                <div class="card h-100"><div class="card-body">
+                    <span class="text-muted small">Setups abertos</span>
+                    <div class="fs-2 fw-bold">{{ rows|selectattr('setup.closed_at','none')|list|length }}</div>
+                </div></div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="card h-100"><div class="card-body">
+                    <span class="text-muted small">Sessões MT5</span>
+                    <div class="fs-2 fw-bold">{{ sessions|length }}</div>
+                </div></div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="card h-100"><div class="card-body">
+                    <span class="text-muted small">Chaves ativas</span>
+                    <div class="fs-2 fw-bold">{{ keys|selectattr('is_active')|list|length }}</div>
+                </div></div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="card h-100"><div class="card-body">
+                    <span class="text-muted small">Modelo</span>
+                    <div class="fw-bold">{{ engine_kind }}</div>
+                    <div class="small text-muted">{{ engine_version }}</div>
+                </div></div>
+            </div>
+        </div>
+
+        <div class="alert alert-secondary">
+            <h6 class="fw-bold"><i class="bi bi-info-circle me-2"></i>O que este módulo faz, e o que não faz</h6>
+            <p class="mb-2">
+                Calcula o resultado de cada cenário nas <strong>duas contas separadamente</strong> e estima
+                qual barreira da mesa deve ser atingida primeiro. As três probabilidades
+                (take primeiro, stop primeiro, nenhuma até o prazo) são mutuamente exclusivas e somam 100%.
+            </p>
+            <p class="mb-0 small">
+                <strong>Não envia, altera nem cancela ordens.</strong> O EA conector é um canal de dados.
+                As probabilidades do modelo atual são <strong>teóricas</strong>: derivam de hipóteses
+                declaradas sobre o processo de preço, não de frequências medidas neste ativo. Não há,
+                neste projeto, backtest com custos que valide uma previsão — e nada aqui se apresenta
+                como tal.
+            </p>
+        </div>
+    </div>
+
+    {# ---------- 2. setups ---------- #}
+    <div class="tab-pane fade" id="tab-setups" role="tabpanel">
+        <div class="row g-4">
+            <div class="col-xl-7">
+                <section class="card">
+                    <div class="card-header"><i class="bi bi-list-task me-2"></i>Setups</div>
+                    <div class="card-body p-0">
+                        <table class="table table-dark table-hover mb-0 align-middle">
+                            <thead><tr>
+                                <th>Nome</th><th>Mesa</th><th>Corretora</th><th>Objetivo</th><th>Estado</th><th></th>
+                            </tr></thead>
+                            <tbody>
+                            {% for row in rows %}
+                                <tr>
+                                    <td>
+                                        <strong>{{ row.setup.name }}</strong>
+                                        <div class="small text-muted">
+                                            id {{ row.setup.id }} · v{{ row.setup.current_version }} · {{ row.setup.mode }}
+                                        </div>
+                                    </td>
+                                    <td>
+                                        {% if row.version %}
+                                        <span class="badge {% if row.version.desk_is_long %}bg-success{% else %}bg-danger{% endif %}">
+                                            {{ 'COMPRA' if row.version.desk_is_long else 'VENDA' }}
+                                        </span>
+                                        <div class="small">{{ row.version.desk_symbol }}</div>
+                                        <div class="small text-muted">
+                                            {{ row.version.desk_entry }} → {{ row.version.desk_take }} / {{ row.version.desk_stop }}
+                                        </div>
+                                        {% endif %}
+                                    </td>
+                                    <td class="small">{{ row.version.broker_symbol if row.version }}</td>
+                                    <td class="small">
+                                        {{ 'Take da mesa' if row.setup.objective == 'FAVOR_DESK_TAKE' else 'Lucro na corretora' }}
+                                    </td>
+                                    <td>
+                                        {% if row.setup.closed_at %}
+                                        <span class="badge bg-secondary">{{ row.setup.closed_reason }}</span>
+                                        {% else %}
+                                        <span class="badge bg-success">aberto</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        <a class="btn btn-sm btn-outline-light"
+                                           href="/dashboard/hedge?setup={{ row.setup.id }}#hist">ver</a>
+                                        {% if not row.setup.closed_at %}
+                                        <form method="post" action="/dashboard/hedge/setup/close" class="d-inline">
+                                            <input type="hidden" name="setup_id" value="{{ row.setup.id }}">
+                                            <button class="btn btn-sm btn-outline-danger"
+                                                    onclick="return confirm('Encerrar este setup? Ele deixa de receber previsão.')">
+                                                encerrar
+                                            </button>
+                                        </form>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% else %}
+                                <tr><td colspan="6" class="text-muted p-4">Nenhum setup ainda.</td></tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                {% if versions %}
+                <section class="card mt-4">
+                    <div class="card-header"><i class="bi bi-layers me-2"></i>Versões de {{ selected.name }}</div>
+                    <div class="card-body p-0">
+                        <table class="table table-dark table-sm mb-0">
+                            <thead><tr><th>v</th><th>Entrada</th><th>Take</th><th>Stop</th><th>Motivo</th><th>Quando</th></tr></thead>
+                            <tbody>
+                            {% for v in versions %}
+                                <tr class="{% if v.version == selected.current_version %}table-active{% endif %}">
+                                    <td>{{ v.version }}</td>
+                                    <td>{{ v.desk_entry }}</td>
+                                    <td>{{ v.desk_take }}</td>
+                                    <td>{{ v.desk_stop }}</td>
+                                    <td class="small text-muted">{{ v.change_note or 'versão inicial' }}</td>
+                                    <td class="small">{{ v.created_at.strftime('%d/%m %H:%M') if v.created_at }}</td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-footer small text-muted">
+                        Alterar um setup em acompanhamento cria versão nova em vez de reescrever a atual:
+                        o histórico de análises aponta para a versão sob a qual foi calculado.
+                    </div>
+                </section>
+                {% endif %}
+            </div>
+
+            <div class="col-xl-5">
+                <section class="card">
+                    <div class="card-header"><i class="bi bi-plus-square me-2"></i>Novo setup / nova versão</div>
+                    <form method="post" action="/dashboard/hedge/setup" class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label small">Nome</label>
+                            <input class="form-control" name="name" required maxlength="120"
+                                   value="{{ selected.name if selected }}">
+                        </div>
+                        <input type="hidden" name="setup_id" value="{{ selected.id if selected }}">
+
+                        <h6 class="text-uppercase small text-muted mt-3">Operação na mesa</h6>
+                        <div class="row g-2">
+                            <div class="col-7">
+                                <label class="form-label small">Ativo (mesa)</label>
+                                <input class="form-control" name="desk_symbol" required
+                                       value="{{ selected_version.desk_symbol if selected_version }}">
+                            </div>
+                            <div class="col-5">
+                                <label class="form-label small">Direção</label>
+                                <select class="form-select" name="desk_direction">
+                                    <option value="LONG" {% if selected_version and selected_version.desk_is_long %}selected{% endif %}>Compra</option>
+                                    <option value="SHORT" {% if selected_version and not selected_version.desk_is_long %}selected{% endif %}>Venda</option>
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small">Unidade dos níveis</label>
+                                <select class="form-select" name="level_unit">
+                                    {% for u in level_units %}
+                                    <option value="{{ u.value }}"
+                                        {% if selected_version and selected_version.level_unit == u.value %}selected{% endif %}>
+                                        {{ {'PRICE':'Preço absoluto','TICKS':'Ticks','POINTS':'Pontos','MONEY':'Valor financeiro'}[u.value] }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                <div class="form-text">
+                                    Ticks e pontos são coisas diferentes: no MNQ o tick vale 0,25 e o ponto 0,01.
+                                    O nível resultante em preço aparece na tabela depois de salvar.
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small">Entrada</label>
+                                <input class="form-control" name="desk_entry" required
+                                       value="{{ selected_version.desk_entry if selected_version }}">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small">Take</label>
+                                <input class="form-control" name="desk_take" required
+                                       value="{{ selected_version.desk_take if selected_version }}">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small">Stop</label>
+                                <input class="form-control" name="desk_stop" required
+                                       value="{{ selected_version.desk_stop if selected_version }}">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small">Contratos</label>
+                                <input class="form-control" name="desk_contracts"
+                                       value="{{ selected_version.desk_contracts if selected_version else '1' }}">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small">Tick size</label>
+                                <input class="form-control" name="desk_tick_size"
+                                       value="{{ selected_version.desk_tick_size if selected_version else '0.25' }}">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small">Tick value</label>
+                                <input class="form-control" name="desk_tick_value"
+                                       value="{{ selected_version.desk_tick_value if selected_version else '0.50' }}">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small">Point</label>
+                                <input class="form-control" name="desk_point"
+                                       value="{{ selected_version.desk_point if selected_version else '0.01' }}">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small">Comissão</label>
+                                <input class="form-control" name="desk_commission"
+                                       value="{{ selected_version.desk_commission if selected_version else '0' }}">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small">Slippage (preço)</label>
+                                <input class="form-control" name="desk_slippage"
+                                       value="{{ selected_version.desk_slippage if selected_version else '0' }}">
+                            </div>
+                        </div>
+
+                        <h6 class="text-uppercase small text-muted mt-4">Cobertura na corretora</h6>
+                        <div class="row g-2">
+                            <div class="col-7">
+                                <label class="form-label small">Símbolo no MT5</label>
+                                <input class="form-control" name="broker_symbol" required list="simbolos"
+                                       value="{{ selected_version.broker_symbol if selected_version }}">
+                                <datalist id="simbolos">
+                                    {% for s in symbols %}<option value="{{ s.name }}">{% endfor %}
+                                </datalist>
+                            </div>
+                            <div class="col-5">
+                                <label class="form-label small">Moeda da conta</label>
+                                <input class="form-control" name="account_currency"
+                                       value="{{ selected_version.account_currency if selected_version else 'USD' }}">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Proporção de cobertura</label>
+                                <input class="form-control" name="coverage_ratio"
+                                       value="{{ selected_version.coverage_ratio if selected_version else '1' }}">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Razão de preço</label>
+                                <input class="form-control" name="price_ratio" placeholder="vazio = mesmo ativo"
+                                       value="{{ selected_version.price_ratio if selected_version and selected_version.price_ratio is not none }}">
+                                <div class="form-text">
+                                    Obrigatória quando os instrumentos são diferentes. O sistema não assume
+                                    equivalência entre futuro e CFD.
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Comissão</label>
+                                <input class="form-control" name="broker_commission"
+                                       value="{{ selected_version.broker_commission if selected_version else '0' }}">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Slippage (preço)</label>
+                                <input class="form-control" name="broker_slippage"
+                                       value="{{ selected_version.broker_slippage if selected_version else '0' }}">
+                            </div>
+                        </div>
+
+                        <h6 class="text-uppercase small text-muted mt-4">Objetivo, modo e prazo</h6>
+                        <div class="row g-2">
+                            <div class="col-12">
+                                <label class="form-label small">Objetivo</label>
+                                <select class="form-select" name="objective">
+                                    <option value="FAVOR_DESK_TAKE"
+                                        {% if selected and selected.objective == 'FAVOR_DESK_TAKE' %}selected{% endif %}>
+                                        Favorecer take da mesa
+                                    </option>
+                                    <option value="FAVOR_BROKER_PROFIT"
+                                        {% if selected and selected.objective == 'FAVOR_BROKER_PROFIT' %}selected{% endif %}>
+                                        Favorecer stop da mesa / lucro na corretora
+                                    </option>
+                                </select>
+                                <div class="form-text">
+                                    Muda a leitura e as cores do gráfico. <strong>Nunca</strong> altera a
+                                    previsão nem o resultado: preferir um cenário não o torna mais provável.
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Modo</label>
+                                <select class="form-select" name="mode">
+                                    <option value="SIMULATION" {% if selected and selected.mode == 'SIMULATION' %}selected{% endif %}>Simulação de entrada</option>
+                                    <option value="TRACKING" {% if selected and selected.mode == 'TRACKING' %}selected{% endif %}>Acompanhamento de operação aberta</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Horizonte (min)</label>
+                                <input class="form-control" name="horizon_minutes"
+                                       value="{{ (selected_version.horizon_seconds // 60) if selected_version else 60 }}">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Fuso de exibição</label>
+                                <input class="form-control" name="display_timezone"
+                                       value="{{ selected_version.display_timezone if selected_version else 'UTC' }}">
+                                <div class="form-text">Internamente tudo é UTC.</div>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Validade do dado (s)</label>
+                                <input class="form-control" name="data_max_age_seconds"
+                                       value="{{ selected_version.data_max_age_seconds if selected_version else 30 }}">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Ticket MT5 (opcional)</label>
+                                <input class="form-control" name="mt5_position_ticket"
+                                       value="{{ selected_version.mt5_position_ticket if selected_version and selected_version.mt5_position_ticket }}">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Referência na mesa</label>
+                                <input class="form-control" name="desk_reference"
+                                       value="{{ selected_version.desk_reference if selected_version and selected_version.desk_reference }}">
+                                <div class="form-text">
+                                    Anotação sua. O sistema não verifica se essa posição existe.
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small">Motivo da alteração</label>
+                                <input class="form-control" name="change_note"
+                                       placeholder="obrigatório na prática: fica no histórico de versões">
+                            </div>
+                        </div>
+
+                        <button class="btn btn-primary w-100 mt-4" type="submit">
+                            <i class="bi bi-save me-1"></i>Salvar
+                        </button>
+                    </form>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    {# ---------- 3. conexões e chaves ---------- #}
+    <div class="tab-pane fade" id="tab-chaves" role="tabpanel">
+        <div class="row g-4">
+            <div class="col-lg-7">
+                <section class="card">
+                    <div class="card-header"><i class="bi bi-key me-2"></i>Chaves do conector</div>
+                    <div class="card-body p-0">
+                        <table class="table table-dark mb-0 align-middle">
+                            <thead><tr><th>Nome</th><th>Prefixo</th><th>Último uso</th><th>Chamadas</th><th></th></tr></thead>
+                            <tbody>
+                            {% for k in keys %}
+                                <tr class="{% if not k.is_active %}opacity-50{% endif %}">
+                                    <td>{{ k.name }}</td>
+                                    <td><code>{{ k.prefix }}…</code></td>
+                                    <td class="small">{{ k.last_used_at.strftime('%d/%m %H:%M') if k.last_used_at else 'nunca' }}</td>
+                                    <td>{{ k.request_count }}</td>
+                                    <td class="text-end">
+                                        {% if k.is_active %}
+                                        <form method="post" action="/dashboard/hedge/key/revoke" class="d-inline">
+                                            <input type="hidden" name="token_id" value="{{ k.id }}">
+                                            <button class="btn btn-sm btn-outline-danger"
+                                                    onclick="return confirm('Revogar? O conector para na próxima consulta.')">
+                                                revogar
+                                            </button>
+                                        </form>
+                                        {% else %}
+                                        <span class="badge bg-secondary">revogada</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% else %}
+                                <tr><td colspan="5" class="text-muted p-4">Nenhuma chave ainda.</td></tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="card mt-4">
+                    <div class="card-header"><i class="bi bi-shield-lock me-2"></i>Como guardar a chave</div>
+                    <div class="card-body small">
+                        <ul class="mb-0">
+                            <li>Cole-a no campo <code>ApiKey</code> do EA, <strong>no próprio terminal</strong>.</li>
+                            <li><strong>Não</strong> a salve em arquivos <code>.set</code>, perfis ou templates
+                                que você compartilhe: eles viajam em claro.</li>
+                            <li>Uma chave por máquina. Assim, perder o notebook custa revogar uma só.</li>
+                            <li>Revogação tem efeito imediato — a validação consulta o banco a cada requisição.</li>
+                            <li>Permissões fixas: telemetria, leitura de setup e análise. Nunca ordem,
+                                nunca setup de outro usuário.</li>
+                        </ul>
+                    </div>
+                </section>
+            </div>
+
+            <div class="col-lg-5">
+                <section class="card">
+                    <div class="card-header"><i class="bi bi-plus-circle me-2"></i>Gerar chave</div>
+                    <form method="post" action="/dashboard/hedge/key" class="card-body">
+                        <label class="form-label small">Para que serve</label>
+                        <input class="form-control mb-3" name="name" required maxlength="80"
+                               placeholder="Conector do notebook">
+                        <button class="btn btn-primary w-100"><i class="bi bi-key me-1"></i>Gerar</button>
+                        <p class="form-text mt-3 mb-0">
+                            O segredo aparece uma única vez, nesta tela. Depois disso só existe o hash.
+                        </p>
+                    </form>
+                </section>
+
+                <section class="card mt-4">
+                    <div class="card-header"><i class="bi bi-pc-display me-2"></i>Configurar no MetaTrader</div>
+                    <div class="card-body small">
+                        <ol class="ps-3">
+                            <li class="mb-2">Copie <code>TraderTopHedgeConnector.mq5</code>,
+                                <code>TraderTopHedgeIndicator.mq5</code> e a pasta
+                                <code>Include/TraderTop/</code> para a pasta de dados do terminal
+                                (Arquivo → Abrir pasta de dados → <code>MQL5</code>).</li>
+                            <li class="mb-2">Compile os dois no MetaEditor (F7).</li>
+                            <li class="mb-2">Libere a URL em Ferramentas → Opções → Expert Advisors →
+                                "Permitir WebRequest para as URLs listadas":
+                                <code class="user-select-all">{{ api_base }}</code></li>
+                            <li class="mb-2">Ligue o <strong>AutoTrading</strong>. O EA não opera — mas sem
+                                esse botão o terminal não executa EA nenhum.</li>
+                            <li class="mb-2">Anexe o <strong>conector</strong> (pode ser num gráfico separado,
+                                se você já tem outro EA no principal) e o <strong>indicador</strong> no gráfico
+                                que você quer ver. Informe o mesmo <code>SetupId</code> nos dois — e o mesmo
+                                <code>ChartIdOverride</code>, se estiverem em gráficos diferentes.</li>
+                        </ol>
+                        <div class="alert alert-secondary mb-0 small">
+                            O <strong>Strategy Tester não executa WebRequest</strong>. Testar o conector ali
+                            devolve sempre −1. Use uma conta demo real.
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    {# ---------- 4. ao vivo ---------- #}
+    <div class="tab-pane fade" id="tab-vivo" role="tabpanel">
+        <section class="card">
+            <div class="card-header"><i class="bi bi-broadcast me-2"></i>Sessões MT5</div>
+            <div class="card-body p-0">
+                <table class="table table-dark mb-0 align-middle">
+                    <thead><tr>
+                        <th>Setup</th><th>Terminal</th><th>Gráfico</th><th>Símbolo</th>
+                        <th>Seq.</th><th>Estado</th><th>Idade</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for s in sessions %}
+                        <tr>
+                            <td>{{ s.session.setup_id }}</td>
+                            <td class="small"><code>{{ s.session.terminal_id }}</code></td>
+                            <td class="small"><code>{{ s.session.chart_id }}</code></td>
+                            <td>{{ s.session.symbol }}</td>
+                            <td>{{ s.session.last_sequence }}</td>
+                            <td>
+                                {% set st = s.freshness.state.value %}
+                                <span class="badge
+                                    {% if st == 'CONNECTED' %}bg-success
+                                    {% elif st == 'STALE_DATA' %}bg-warning text-dark
+                                    {% elif st == 'DISCONNECTED' %}bg-danger
+                                    {% else %}bg-secondary{% endif %}">{{ st }}</span>
+                            </td>
+                            <td class="small text-muted">
+                                {{ '%.0f s'|format(s.freshness.age_seconds) if s.session.last_seen_at else '—' }}
+                            </td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="7" class="text-muted p-4">
+                            Nenhuma sessão. Anexe o EA conector com um <code>SetupId</code> válido.
+                        </td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer small text-muted">
+                Dois gráficos do mesmo ativo são duas sessões — é o caso normal, já que o conector
+                costuma ficar num gráfico separado. Passada a validade do setup, o último resultado
+                deixa de aparecer como sinal atual.
+            </div>
+        </section>
+    </div>
+
+    {# ---------- 5. histórico ---------- #}
+    <div class="tab-pane fade" id="tab-hist" role="tabpanel">
+        <section class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-clock-history me-2"></i>
+                    Análises {% if selected %}de {{ selected.name }}{% endif %}</span>
+                <form method="get" action="/dashboard/hedge" class="d-flex gap-2">
+                    <select class="form-select form-select-sm" name="setup" onchange="this.form.submit()">
+                        {% for row in rows %}
+                        <option value="{{ row.setup.id }}"
+                            {% if selected and row.setup.id == selected.id %}selected{% endif %}>
+                            {{ row.setup.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </form>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-dark table-sm mb-0">
+                    <thead><tr>
+                        <th>Quando</th><th>v</th><th>Seq.</th><th>Preço</th>
+                        <th>Take</th><th>Stop</th><th>Nenhuma</th><th>Modelo</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for h in history %}
+                        <tr>
+                            <td class="small">{{ h.captured_at.strftime('%d/%m %H:%M:%S') if h.captured_at }}</td>
+                            <td>{{ h.setup_version }}</td>
+                            <td>{{ h.sequence }}</td>
+                            <td>{{ h.current_price }}</td>
+                            {% if h.forecast_available %}
+                            <td class="text-success">{{ '%.0f%%'|format(h.take_first * 100) }}</td>
+                            <td class="text-danger">{{ '%.0f%%'|format(h.stop_first * 100) }}</td>
+                            <td class="text-muted">{{ '%.0f%%'|format(h.no_barrier * 100) }}</td>
+                            {% else %}
+                            <td colspan="3" class="small text-warning">
+                                sem estimativa — {{ h.unavailable_reason }}
+                            </td>
+                            {% endif %}
+                            <td class="small text-muted">{{ h.model_kind }}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="8" class="text-muted p-4">Nenhuma análise registrada.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer small text-muted">
+                As linhas sem estimativa ficam registradas de propósito: um histórico que só guarda
+                os acertos não serve para medir calibração, porque faltariam justamente as vezes em
+                que o modelo se calou.
+            </div>
+        </section>
+    </div>
+
+    {# ---------- 6. JEV ---------- #}
+    <div class="tab-pane fade" id="tab-jev" role="tabpanel">
+        <section class="card">
+            <div class="card-header"><i class="bi bi-cpu me-2"></i>Classificação de contexto (JEV)</div>
+            <div class="card-body">
+                <div class="row g-3 mb-3">
+                    <div class="col-sm-6 col-lg-3">
+                        <span class="text-muted small">Estado</span>
+                        <div class="fw-bold {% if jev_enabled %}text-success{% else %}text-secondary{% endif %}">
+                            {{ 'ligado' if jev_enabled else 'desligado' }}
+                        </div>
+                    </div>
+                    <div class="col-sm-6 col-lg-3">
+                        <span class="text-muted small">Chave</span>
+                        <div class="fw-bold">{{ 'configurada' if jev_configured else 'ausente' }}</div>
+                    </div>
+                    <div class="col-sm-6 col-lg-3">
+                        <span class="text-muted small">Modelo</span>
+                        <div class="fw-bold">{{ jev_model }}</div>
+                    </div>
+                    <div class="col-sm-6 col-lg-3">
+                        <span class="text-muted small">Timeout / cache</span>
+                        <div class="fw-bold">{{ jev_timeout }}s / {{ jev_cache_ttl }}s</div>
+                    </div>
+                </div>
+
+                <div class="alert alert-warning">
+                    <strong>Modo observação.</strong> A classificação do JEV é gravada ao lado da análise
+                    e <strong>não altera as probabilidades</strong>. Permitir influência exige avaliação
+                    fora da amostra que ainda não foi feita — e até lá, deixá-la mexer no número seria
+                    trocar um modelo explicável por um palpite.
+                </div>
+
+                <h6 class="fw-bold">O que o JEV não é aqui</h6>
+                <ul class="small">
+                    <li>Não é calculadora financeira — os valores vêm do motor local.</li>
+                    <li>Não é fonte de cotação.</li>
+                    <li>Não substitui o modelo estatístico.</li>
+                    <li>Não gera probabilidade de mercado.</li>
+                    <li>Não autoriza ignorar limite de risco.</li>
+                </ul>
+
+                <p class="small text-muted mb-0">
+                    Configuração em <code>.env</code> (<code>JEV_ENABLED</code>, <code>JEV_API_KEY</code>,
+                    <code>JEV_MODEL</code>, <code>JEV_TIMEOUT_SECONDS</code>,
+                    <code>JEV_CACHE_TTL_SECONDS</code>). A chave fica só no backend: não existe campo
+                    para ela no painel nem linha no banco. Se o JEV falhar, o motor financeiro e o
+                    indicador continuam funcionando.
+                </p>
+            </div>
+        </section>
+    </div>
+
+    </div>
+</section>
+{% endblock %}
