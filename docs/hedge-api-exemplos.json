@@ -5,7 +5,6 @@
     "",
     "A chave viaja SEMPRE no header X-API-Key, nunca na URL."
   ],
-
   "POST /api/v1/hedge/snapshot": {
     "request": {
       "headers": {
@@ -50,7 +49,6 @@
         "forex o primeiro e contagem de cotacoes, nao quantidade negociada."
       ]
     },
-
     "response_200_completa": {
       "schema_version": 1,
       "setup_id": 7,
@@ -151,24 +149,27 @@
         "warnings": []
       },
       "jev": {
-        "state": "",
-        "confidence": null,
+        "available": true,
+        "category": "EVENT_RISK_NEAR",
+        "confidence": 0.81,
+        "needs_review": true,
+        "reason": "",
+        "model": "jev-1.13.0",
         "observation_only": true
       },
       "analysis_valid_until": "2026-10-28T14:03:31+00:00",
       "warnings": [],
       "disclaimer": "Classificacao e probabilidades sao estimativas do modelo declarado, nao garantia de resultado. Este conector nao envia ordens.",
-
       "_notas": [
         "As tres probabilidades somam 1; os inteiros _pct somam 100 por",
         "maior resto. Formatar no MQL5 exigiria replicar a regra, e duas",
         "implementacoes divergem.",
         "",
         "Os tres cenarios dao o mesmo liquido porque a cobertura e perfeita:",
-        "o que sobra e o custo das duas pontas. Cobrir nao e de graca."
+        "o que sobra e o custo das duas pontas. Cobrir nao e de graca.",
+        "O bloco jev e classificacao de CONTEXTO (titulos de evento economico) em modo observacao: gravado e exibido, nunca somado as probabilidades. available=false com reason distingue desligado / sem evento / falhou."
       ]
     },
-
     "response_200_sem_previsao": {
       "_quando": "Sem ATR com escala temporal, ou sem retornos suficientes.",
       "schema_version": 1,
@@ -205,24 +206,27 @@
         "independente."
       ]
     },
-
     "response_200_sem_financeiro": {
       "_quando": "tick_value ausente ou zero no snapshot.",
       "state": "CONNECTED",
-      "forecast": { "available": true, "take_first_pct": 26 },
+      "forecast": {
+        "available": true,
+        "take_first_pct": 26
+      },
       "financial": {
         "available": false,
         "reason": "Dados insuficientes para calcular: MNQZ5: tick_value ausente ou zero",
         "warnings": []
       }
     },
-
     "response_200_encerrada": {
       "_quando": "Barreira tocada por preco executavel, ou prazo esgotado.",
       "state": "CLOSED",
       "state_reason": "Barreira atingida: DESK_TAKE.",
       "closed_reason": "DESK_TAKE",
-      "deadline": { "seconds_remaining": 0 },
+      "deadline": {
+        "seconds_remaining": 0
+      },
       "forecast": {
         "available": false,
         "reason": "BARRIER_HIT",
@@ -238,7 +242,6 @@
         "meio declararia barreira tocada antes de o preco de saida chegar."
       ]
     },
-
     "erros": {
       "401": {
         "detail": "Chave de API ausente ou invalida. Envie o header X-API-Key.",
@@ -256,24 +259,58 @@
         "detail": "Conector fala o schema 2; este servidor fala 1. Atualize o EA conector.",
         "_nota": "O EA e compilado na maquina do operador; atualizar o servidor nao atualiza o terminal."
       },
-      "422": { "detail": "bid e ask precisam ser positivos, com ask >= bid." },
-      "429": { "detail": "Limite de snapshots por segundo atingido para esta chave." }
+      "422": {
+        "detail": "bid e ask precisam ser positivos, com ask >= bid."
+      },
+      "429": {
+        "detail": "Limite de snapshots por segundo atingido para esta chave."
+      }
+    },
+    "response_200_jev_sem_evento": {
+      "_quando": "Jev ligado, mas nenhum evento de calendario na janela. NENHUMA chamada e feita.",
+      "jev": {
+        "available": false,
+        "category": "CALM",
+        "confidence": null,
+        "needs_review": false,
+        "reason": "SEM_EVENTO_NA_JANELA",
+        "model": "",
+        "observation_only": true
+      },
+      "_notas": [
+        "A categoria e verdadeira, mas nenhum modelo a emitiu — e por isso available e false.",
+        "Este e o caso mais comum, e o mais barato: custo zero."
+      ]
+    },
+    "response_200_jev_desligado": {
+      "_quando": "JEV_ENABLED=false (o padrao).",
+      "jev": {
+        "available": false,
+        "category": "",
+        "confidence": null,
+        "needs_review": false,
+        "reason": "",
+        "model": "",
+        "observation_only": true
+      }
     }
   },
-
   "GET /api/v1/hedge/ping": {
     "response_200": {
       "schema_version": 1,
       "ok": true,
       "token_name": "Conector do notebook",
       "token_prefix": "tt_EXEMP",
-      "scopes": ["hedge:analysis", "hedge:setup:read", "hedge:telemetry"],
+      "scopes": [
+        "hedge:analysis",
+        "hedge:setup:read",
+        "hedge:telemetry"
+      ],
       "user_id": 3,
       "server_time": "2026-10-28T14:03:21+00:00"
     },
     "_nota": "O prefixo identifica QUAL chave esta em uso sem revelar o segredo."
   },
-
   "GET /api/v1/hedge/setups": {
     "response_200": {
       "schema_version": 1,
@@ -298,13 +335,16 @@
     },
     "_nota": "Somente os setups do dono da chave."
   },
-
   "GET /api/v1/hedge/history/7?limit=2": {
     "response_200": {
       "schema_version": 1,
       "setup_id": 7,
       "closed_reason": "",
-      "scenarios": ["DESK_TAKE", "DESK_STOP", "TIMEOUT"],
+      "scenarios": [
+        "DESK_TAKE",
+        "DESK_STOP",
+        "TIMEOUT"
+      ],
       "items": [
         {
           "id": 1402,

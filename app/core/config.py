@@ -207,6 +207,14 @@ class Settings(BaseSettings):
     completa sem ele. Um timeout generoso transformaria uma melhoria visual
     em atraso no desenho do grafico, que e o oposto do objetivo."""
 
+    jev_daily_call_budget: int = 200
+    """Teto DURO de chamadas ao Jev por dia UTC, contado no banco.
+
+    O cache evita repeticao; isto evita surpresa. Sao problemas
+    diferentes: o cache nao protege contra um dia com muitos simbolos nem
+    contra varios reinicios do processo, cada um comecando com cache
+    vazio. Zero = sem limite. Ver `app/jev/hedge_context.py`."""
+
     jev_cache_ttl_seconds: float = 300.0
     """Teto de idade da classificacao. O corte real e a candle: enquanto a
     candle e o resumo tecnico nao mudam, a resposta e reaproveitada. Este

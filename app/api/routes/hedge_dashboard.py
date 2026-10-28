@@ -40,6 +40,8 @@ from app.hedge.engine import Mode, Objective
 from app.hedge.forecast.registry import available_versions, default_engine
 from app.hedge.sessions import evaluate_freshness
 from app.hedge.units import LevelUnit, level_to_price
+from app.jev.hedge_context import BUDGET_SETTING as JEV_BUDGET_SETTING
+from app.news.budget import read_usage
 
 router = APIRouter(tags=["hedge-dashboard"])
 
@@ -142,6 +144,9 @@ def dashboard_hedge(
             "jev_model": settings.jev_model,
             "jev_timeout": settings.jev_timeout_seconds,
             "jev_cache_ttl": settings.jev_cache_ttl_seconds,
+            "jev_usage": read_usage(
+                db, limit=settings.jev_daily_call_budget, key=JEV_BUDGET_SETTING
+            ),
             "api_base": str(request.base_url).rstrip("/"),
             "now": agora,
         },

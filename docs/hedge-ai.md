@@ -171,6 +171,71 @@ observações independentes. Até existir essa avaliação, nada muda.
 
 ---
 
+## JEV: classificação de contexto
+
+Camada **opcional** (`JEV_ENABLED=false` por padrão) que lê o que há de
+**texto** em volta da operação — títulos de evento do calendário econômico,
+filtrados pelas moedas do instrumento — e devolve uma categoria entre
+quatro:
+
+| Categoria | Quando |
+|---|---|
+| `CALM` | nenhum evento relevante na janela |
+| `EVENT_RISK_NEAR` | evento de alto impacto próximo |
+| `ELEVATED_UNCERTAINTY` | vários eventos médios, sem gatilho dominante |
+| `INSUFFICIENT_CONTEXT` | sem base para classificar |
+
+Mais uma pergunta de sim/não (`needs_review`), que vem como probabilidade
+calibrada e vira aviso acima de 0,6.
+
+### Modo observação é estrutural
+
+A classificação é **gravada e exibida**, e não entra nas probabilidades.
+Isso não é uma configuração que alguém possa virar: o veredito nasce
+**depois** da previsão em `HedgeService.analyze` e não é passado ao
+`ForecastEngine` — não existe caminho pelo qual ele alcance o motor
+estatístico. Um teste de integração compara a previsão com e sem JEV e
+exige que sejam idênticas.
+
+Permitir influência exigiria avaliação fora da amostra que não foi feita.
+Até lá, deixar um classificador de texto mexer num número seria trocar um
+modelo explicável por um palpite — e o palpite chegaria à tela com a mesma
+aparência.
+
+### Por que o custo não explode
+
+O conector manda snapshot a cada 1–2 s, por gráfico. Uma chamada por
+snapshot seriam ~43 mil por dia por gráfico. Três defesas, de fora para
+dentro, cada uma porque a de dentro custa mais:
+
+1. **Não há o que classificar.** Sem evento na janela a resposta sai `CALM`
+   **sem tocar a rede**. É o caso mais comum.
+2. **Cache pela impressão digital do contexto**, não do snapshot: o
+   conjunto de eventos com o tempo em faixas de 5 minutos. O preço não
+   entra — se entrasse, a chave mudaria a cada tick e o cache não valeria
+   nada.
+3. **Teto diário** em `system_settings` (`JEV_DAILY_CALL_BUDGET`, padrão
+   200), com **chave própria** separada da MarketPulse: compartilhar faria
+   o gasto de uma API esgotar o orçamento da outra. Acerto de cache não
+   consome; chamada que falhou consome, senão um endpoint quebrado seria
+   tentado sem limite.
+
+O consumo do dia aparece na aba **JEV** do painel.
+
+### O que o JEV não é aqui
+
+Não calcula dinheiro, não fornece cotação, não substitui o motor
+estatístico, não gera probabilidade de mercado e não autoriza ignorar
+limite nenhum. O `state` enviado é uma **lista fechada** com símbolo,
+moedas, horizonte e os títulos de evento — nenhum preço, nível, lote ou
+dado de conta.
+
+Se o JEV cair, o motor financeiro e a previsão seguem: a camada é envolvida
+e `available` vem `false` com um `reason` que distingue "desligado" de
+"sem evento" de "falhou".
+
+---
+
 ## Estados
 
 | Estado | Significa | Desenha? |
@@ -335,7 +400,10 @@ ligado, (3) `SetupId` existe e é seu, (4) aba **Experts** do terminal.
   incerta.
 - **O limite de taxa é por processo.** Com vários workers o teto efetivo é
   o limite vezes o número de processos.
-- **JEV em modo observação**: classifica contexto, não influencia número.
+- **JEV em modo observação**: classifica contexto e **não** influencia
+  número. Isso é estrutural, não configurável — a classificação nasce
+  depois da previsão e não é passada ao motor estatístico; um teste exige
+  que a previsão com e sem JEV seja idêntica.
 - **Acompanhamento sem ticket do MT5** é uma anotação do operador. O
   sistema **não afirma** acompanhar uma posição cuja existência não
   consegue verificar.

@@ -336,3 +336,33 @@ def test_the_page_shows_the_webrequest_url_to_authorize(logged_in) -> None:
 
     assert "WebRequest" in html
     assert "Strategy Tester" in html
+
+
+# --- aba do JEV -------------------------------------------------------------
+
+
+def test_the_jev_tab_lists_the_four_categories(logged_in) -> None:
+    html = logged_in.get("/dashboard/hedge").text
+
+    for categoria in (
+        "CALM",
+        "EVENT_RISK_NEAR",
+        "ELEVATED_UNCERTAINTY",
+        "INSUFFICIENT_CONTEXT",
+    ):
+        assert categoria in html, categoria
+
+
+def test_the_jev_tab_shows_the_daily_usage(logged_in) -> None:
+    """O operador precisa poder ver quanto ja gastou antes de descobrir
+    pela cota esgotada."""
+    html = logged_in.get("/dashboard/hedge").text
+
+    assert "Consumo hoje" in html
+
+
+def test_the_jev_tab_states_observation_mode(logged_in) -> None:
+    html = logged_in.get("/dashboard/hedge").text
+
+    assert "observação" in html or "observacao" in html
+    assert "não altera as probabilidades" in html or "nao altera as probabilidades" in html

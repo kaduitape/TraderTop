@@ -715,3 +715,278 @@ def test_the_mql5_sources_send_no_orders() -> None:
             "OrderClose",
         ):
             assert proibido not in fonte, f"{nome}: {proibido}"
+
+
+# --- JEV: contexto em modo observacao --------------------------------------
+
+
+@pytest.fixture
+def _limpa_orcamento_jev(db_session):
+    from app.database.models.system_setting import SystemSetting
+
+    def apagar() -> None:
+        db_session.query(SystemSetting).filter(
+            SystemSetting.key == "jev_daily_usage"
+        ).delete(synchronize_session=False)
+        db_session.commit()
+
+    apagar()
+    yield
+    apagar()
+
+
+def _liga_jev(monkeypatch, handler, *, eventos=None):
+    """Liga o Jev com um transporte falso e um calendario controlado."""
+    import httpx
+
+    from app.jev import factory
+    from app.jev.cache import TTLCache
+    from app.jev.client import JevClient
+    from app.jev.hedge_context import (
+        ContextEvent,
+        HedgeContextAssessment,
+        HedgeContextAssessor,
+        HedgeContextInput,
+    )
+
+    classificador = HedgeContextAssessor(
+        JevClient(api_key="k", transport=httpx.MockTransport(handler)),
+        cache=TTLCache[HedgeContextAssessment](ttl_seconds=300),
+        cache_ttl_seconds=300,
+        daily_budget=100,
+    )
+    monkeypatch.setattr(factory, "get_context_assessor", lambda settings=None: classificador)
+
+    # O calendario real le arquivo; aqui o contexto e injetado direto.
+    from app.hedge import service as servico
+
+    def contexto_falso(session, *, symbol, horizon_seconds, settings, now=None, provider=None):
+        return HedgeContextInput(
+            symbol=symbol,
+            currencies=("USD",),
+            events=tuple(
+                ContextEvent(title=t, impact=i, minutes_until=m, currency="USD")
+                # `is None`, nao `or`: lista VAZIA e o caso que este helper
+                # precisa poder representar — "nenhum evento na janela" —, e
+                # `or` a trataria como ausencia, voltando ao evento padrao.
+                for t, i, m in (
+                    [("CPI y/y", "HIGH", 12)] if eventos is None else eventos
+                )
+            ),
+            horizon_minutes=60,
+            calendar_usable=True,
+        )
+
+    monkeypatch.setattr(servico, "build_context", contexto_falso)
+    return classificador
+
+
+def _resposta_jev(categoria="EVENT_RISK_NEAR", confianca=0.81, revisao=0.7):
+    import httpx
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={
+                "model": "jev-1.13.0",
+                "answers": {
+                    "market_context": {
+                        "type": "choice",
+                        "choice": categoria,
+                        "confidence": confianca,
+                        "probabilities": {categoria: confianca},
+                    },
+                    "needs_review": {"type": "noul", "noul": revisao},
+                },
+            },
+        )
+
+    return handler
+
+
+def test_jev_off_leaves_the_block_unavailable(client, db_session) -> None:
+    """Desligado e o padrao. O bloco existe e diz que nao ha
+    classificacao — omiti-lo obrigaria o EA a tratar dois formatos."""
+    user = _usuario(db_session, "hedge_jevoff")
+    db_session.commit()
+    setup = _setup(db_session, user.id)
+    k = _chave(db_session, user.id)
+
+    bloco = client.post(
+        "/api/v1/hedge/snapshot", json=_corpo(setup.id), headers=_cabecalho(k)
+    ).json()["jev"]
+
+    assert bloco["available"] is False
+    assert bloco["observation_only"] is True
+    assert bloco["confidence"] is None
+
+
+def test_jev_classifies_the_context_and_it_reaches_the_payload(
+    client, db_session, monkeypatch, _limpa_orcamento_jev
+) -> None:
+    _liga_jev(monkeypatch, _resposta_jev())
+    user = _usuario(db_session, "hedge_jevon")
+    db_session.commit()
+    setup = _setup(db_session, user.id)
+    k = _chave(db_session, user.id)
+
+    bloco = client.post(
+        "/api/v1/hedge/snapshot", json=_corpo(setup.id), headers=_cabecalho(k)
+    ).json()["jev"]
+
+    assert bloco["available"] is True
+    assert bloco["category"] == "EVENT_RISK_NEAR"
+    assert bloco["confidence"] == 0.81
+    assert bloco["needs_review"] is True
+    assert bloco["model"] == "jev-1.13.0"
+    assert bloco["observation_only"] is True
+
+
+def test_jev_does_not_change_the_forecast(
+    client, db_session, monkeypatch, _limpa_orcamento_jev
+) -> None:
+    """O teste central do modo observacao. A previsao com e sem Jev precisa
+    ser IDENTICA — e ela e, porque a classificacao nasce depois dela e nao
+    e passada ao motor estatistico."""
+    user = _usuario(db_session, "hedge_jevneutro")
+    db_session.commit()
+    setup = _setup(db_session, user.id)
+    k = _chave(db_session, user.id)
+
+    sem = client.post(
+        "/api/v1/hedge/snapshot", json=_corpo(setup.id, seq=1), headers=_cabecalho(k)
+    ).json()
+
+    _liga_jev(monkeypatch, _resposta_jev(categoria="EVENT_RISK_NEAR", confianca=0.99))
+    com = client.post(
+        "/api/v1/hedge/snapshot", json=_corpo(setup.id, seq=2), headers=_cabecalho(k)
+    ).json()
+
+    assert com["jev"]["available"] is True
+    assert sem["jev"]["available"] is False
+
+    for campo in ("take_first", "stop_first", "no_barrier", "model_kind", "model_version"):
+        assert com["forecast"][campo] == sem["forecast"][campo], campo
+    assert com["financial"]["effective_lots"] == sem["financial"]["effective_lots"]
+
+
+def test_a_jev_outage_does_not_break_the_snapshot(
+    client, db_session, monkeypatch, _limpa_orcamento_jev
+) -> None:
+    """Camada acessoria: se o Jev cair, o motor financeiro e a previsao
+    seguem."""
+    import httpx
+
+    def fora_do_ar(request):
+        raise httpx.ConnectError("sem rota", request=request)
+
+    _liga_jev(monkeypatch, fora_do_ar)
+    user = _usuario(db_session, "hedge_jevqueda")
+    db_session.commit()
+    setup = _setup(db_session, user.id)
+    k = _chave(db_session, user.id)
+
+    resposta = client.post(
+        "/api/v1/hedge/snapshot", json=_corpo(setup.id), headers=_cabecalho(k)
+    )
+
+    assert resposta.status_code == 200
+    dados = resposta.json()
+    assert dados["jev"]["available"] is False
+    assert dados["forecast"]["available"] is True
+    assert dados["financial"]["available"] is True
+
+
+def test_a_broken_context_builder_does_not_break_the_snapshot(
+    client, db_session, monkeypatch
+) -> None:
+    """A ponte com o calendario e a parte mais fragil do caminho. Uma
+    excecao ali nao pode custar o snapshot."""
+    from app.hedge import service as servico
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("calendario em pedacos")
+
+    monkeypatch.setattr(servico, "build_context", explode)
+    user = _usuario(db_session, "hedge_jevexplode")
+    db_session.commit()
+    setup = _setup(db_session, user.id)
+    k = _chave(db_session, user.id)
+
+    resposta = client.post(
+        "/api/v1/hedge/snapshot", json=_corpo(setup.id), headers=_cabecalho(k)
+    )
+
+    assert resposta.status_code == 200
+    assert resposta.json()["forecast"]["available"] is True
+
+
+def test_the_classification_is_persisted_for_later_evaluation(
+    client, db_session, monkeypatch, _limpa_orcamento_jev
+) -> None:
+    """Gravada ao lado da analise: e assim que a influencia podera ser
+    avaliada fora da amostra antes de ser permitida."""
+    _liga_jev(monkeypatch, _resposta_jev(categoria="ELEVATED_UNCERTAINTY", confianca=0.64))
+    user = _usuario(db_session, "hedge_jevgrava")
+    db_session.commit()
+    setup = _setup(db_session, user.id)
+    k = _chave(db_session, user.id)
+
+    client.post("/api/v1/hedge/snapshot", json=_corpo(setup.id), headers=_cabecalho(k))
+
+    registro = HedgeRepository(db_session).latest_analysis(setup.id)
+
+    assert registro.jev_state == "ELEVATED_UNCERTAINTY"
+    assert float(registro.jev_confidence) == pytest.approx(0.64)
+
+
+def test_repeated_snapshots_cause_one_jev_call(
+    client, db_session, monkeypatch, _limpa_orcamento_jev
+) -> None:
+    """O conector manda snapshot a cada 1-2s. Uma chamada por snapshot
+    seriam ~43 mil por dia por grafico."""
+    chamadas = {"n": 0}
+    base = _resposta_jev()
+
+    def contando(request):
+        chamadas["n"] += 1
+        return base(request)
+
+    _liga_jev(monkeypatch, contando)
+    user = _usuario(db_session, "hedge_jevcache")
+    db_session.commit()
+    setup = _setup(db_session, user.id)
+    k = _chave(db_session, user.id)
+
+    for i in range(1, 6):
+        client.post(
+            "/api/v1/hedge/snapshot", json=_corpo(setup.id, seq=i), headers=_cabecalho(k)
+        )
+
+    assert chamadas["n"] == 1
+
+
+def test_no_event_in_the_window_costs_no_call(
+    client, db_session, monkeypatch, _limpa_orcamento_jev
+) -> None:
+    """O caso mais comum, e o mais barato."""
+    chamadas = {"n": 0}
+
+    def nunca(request):  # pragma: no cover
+        chamadas["n"] += 1
+        raise AssertionError("nao deveria chamar o Jev sem evento")
+
+    _liga_jev(monkeypatch, nunca, eventos=[])
+    user = _usuario(db_session, "hedge_jevcalmo")
+    db_session.commit()
+    setup = _setup(db_session, user.id)
+    k = _chave(db_session, user.id)
+
+    bloco = client.post(
+        "/api/v1/hedge/snapshot", json=_corpo(setup.id), headers=_cabecalho(k)
+    ).json()["jev"]
+
+    assert chamadas["n"] == 0
+    assert bloco["category"] == "CALM"
+    assert bloco["available"] is False
+    assert bloco["reason"] == "SEM_EVENTO_NA_JANELA"

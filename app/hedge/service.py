@@ -34,9 +34,11 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.database.models.hedge import HedgeAnalysis, HedgeSetup, HedgeSetupVersion
 from app.database.repositories.hedge_repository import HedgeRepository
+from app.hedge.context import build_context
 from app.hedge.contracts import ContractSpec, mapping_for
 from app.hedge.engine import (
     BrokerLeg,
@@ -51,6 +53,7 @@ from app.hedge.forecast.base import Forecast, ForecastInputs, Unavailable
 from app.hedge.forecast.registry import default_engine
 from app.hedge.sessions import SessionState, accepts_sequence, evaluate_freshness
 from app.hedge.units import ConversionError, to_decimal
+from app.jev.hedge_context import HedgeContextAssessment
 
 logger = get_logger(__name__)
 
@@ -138,10 +141,23 @@ class AnalysisOut:
     financial: HedgeCalculation | None = None
     jev_state: str = ""
     jev_confidence: float | None = None
+    jev_available: bool = False
+    """False cobre tres casos distintos, e `jev_reason` os separa: o Jev
+    esta desligado, nao havia evento para classificar, ou a chamada
+    falhou. Os tres desenham a mesma coisa, mas pedem acoes diferentes de
+    quem mantem o sistema."""
+
+    jev_needs_review: bool = False
+    jev_reason: str = ""
+    jev_model: str = ""
     jev_observation_only: bool = True
     """O Jev entra em modo observacao: a classificacao e gravada e
     exibida, mas NAO altera as probabilidades. Permitir influencia exige
-    avaliacao fora da amostra que ainda nao foi feita."""
+    avaliacao fora da amostra que ainda nao foi feita.
+
+    Nao e uma configuracao: a classificacao nasce DEPOIS da previsao em
+    `HedgeService.analyze`, entao nao ha caminho pelo qual ela alcance o
+    motor estatistico."""
 
     analysis_valid_until: datetime | None = None
     closed_reason: str = ""
@@ -242,10 +258,12 @@ def _seconds_remaining(version: HedgeSetupVersion, now: datetime) -> int:
 class HedgeService:
     """O caminho completo de um snapshot."""
 
-    def __init__(self, session: Session, *, engine=None) -> None:
+    def __init__(self, session: Session, *, engine=None, settings=None) -> None:
         self._session = session
         self._repo = HedgeRepository(session)
         self._engine = engine or default_engine()
+        # Injetavel para o teste ligar o Jev sem tocar o `.env`.
+        self._settings = settings or get_settings()
 
     def analyze(
         self, snapshot: SnapshotIn, *, user_id: int, api_token_id: int | None, now: datetime | None = None
@@ -404,6 +422,14 @@ class HedgeService:
                 "informada a mao e o sistema nao verifica se a posicao existe."
             )
 
+        # --- 6. Jev, em modo observacao -----------------------------------
+        #
+        # DEPOIS da previsao, e sem ser passado a ela. Isso e o que torna o
+        # "modo observacao" estrutural em vez de uma configuracao: nao ha
+        # caminho pelo qual a classificacao de contexto alcance o
+        # `ForecastEngine`, porque ela ainda nao existe quando ele roda.
+        contexto = self._jev_context(versao, snapshot, restantes)
+
         saida = AnalysisOut(
             **base,
             state=estado,
@@ -412,10 +438,44 @@ class HedgeService:
             forecast=previsao,
             financial=financeiro,
             analysis_valid_until=previsao.valid_until,
+            jev_state=contexto.category if contexto else "",
+            jev_confidence=contexto.confidence if contexto else None,
+            jev_available=bool(contexto and contexto.available),
+            jev_needs_review=bool(contexto and contexto.needs_review),
+            jev_reason=contexto.unavailable_reason if contexto else "",
+            jev_model=contexto.model if contexto else "",
             warnings=tuple(avisos),
         )
         self._persist(saida, setup=setup, snapshot=snapshot, session_id=sessao.id)
         return saida
+
+    def _jev_context(
+        self, versao: HedgeSetupVersion, snapshot: SnapshotIn, restantes: int
+    ) -> HedgeContextAssessment | None:
+        """A classificacao de contexto, ou None quando o Jev nao esta em uso.
+
+        Tudo aqui dentro e envolvido: esta camada e a mais externa e a mais
+        fragil do caminho, e nenhuma falha dela pode custar o snapshot. Se
+        o calendario sumir, se a rede cair, se a resposta vier torta — o
+        motor financeiro e a previsao ja estao prontos e seguem.
+        """
+        try:
+            from app.jev.factory import get_context_assessor
+
+            classificador = get_context_assessor(self._settings)
+            if classificador is None:
+                return None
+
+            entrada = build_context(
+                self._session,
+                symbol=snapshot.symbol,
+                horizon_seconds=restantes,
+                settings=self._settings,
+            )
+            return classificador.assess(entrada, session=self._session)
+        except Exception:  # noqa: BLE001
+            logger.exception("jev_contexto_falhou", extra={"symbol": snapshot.symbol})
+            return None
 
     # --- partes -----------------------------------------------------------
 
@@ -545,6 +605,11 @@ class HedgeService:
                 else None
             ),
             jev_state=saida.jev_state or None,
+            jev_confidence=(
+                Decimal(str(saida.jev_confidence))
+                if saida.jev_confidence is not None
+                else None
+            ),
         )
         self._repo.record_analysis(registro)
 

@@ -618,12 +618,56 @@
                     </div>
                 </div>
 
+                <div class="row g-3 mb-3">
+                    <div class="col-sm-6 col-lg-4">
+                        <span class="text-muted small">Consumo hoje (UTC)</span>
+                        <div class="fw-bold">
+                            {{ jev_usage.calls }}{% if jev_usage.limit %} / {{ jev_usage.limit }}{% else %} (sem teto){% endif %}
+                        </div>
+                    </div>
+                    <div class="col-sm-6 col-lg-8">
+                        <span class="text-muted small">O que é classificado</span>
+                        <div class="small">
+                            Títulos de evento do calendário econômico, filtrados pelas moedas do
+                            instrumento. <strong>Sem evento na janela, nenhuma chamada acontece</strong> —
+                            e esse é o caso mais comum.
+                        </div>
+                    </div>
+                </div>
+
                 <div class="alert alert-warning">
                     <strong>Modo observação.</strong> A classificação do JEV é gravada ao lado da análise
                     e <strong>não altera as probabilidades</strong>. Permitir influência exige avaliação
                     fora da amostra que ainda não foi feita — e até lá, deixá-la mexer no número seria
                     trocar um modelo explicável por um palpite.
                 </div>
+
+                <h6 class="fw-bold">As quatro categorias</h6>
+                <div class="table-responsive mb-3">
+                    <table class="table table-dark table-sm mb-0">
+                        <thead><tr><th>Categoria</th><th>Quando</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>CALM</code></td>
+                                <td class="small">Nenhum evento relevante na janela.</td></tr>
+                            <tr><td><code>EVENT_RISK_NEAR</code></td>
+                                <td class="small">Evento de alto impacto próximo.</td></tr>
+                            <tr><td><code>ELEVATED_UNCERTAINTY</code></td>
+                                <td class="small">Vários eventos médios, sem gatilho dominante.</td></tr>
+                            <tr><td><code>INSUFFICIENT_CONTEXT</code></td>
+                                <td class="small">Sem base para classificar.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h6 class="fw-bold">Por que o custo não explode</h6>
+                <p class="small">
+                    O conector manda snapshot a cada 1–2 s. Três defesas, de fora para dentro:
+                    <strong>(1)</strong> sem evento na janela não há chamada;
+                    <strong>(2)</strong> cache pela impressão digital do conjunto de eventos, com o
+                    tempo em faixas de 5 min — o preço não entra, senão a chave mudaria a cada tick;
+                    <strong>(3)</strong> teto diário no banco, com chave própria, separada da
+                    MarketPulse.
+                </p>
 
                 <h6 class="fw-bold">O que o JEV não é aqui</h6>
                 <ul class="small">

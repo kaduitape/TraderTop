@@ -232,11 +232,18 @@ def analysis_payload(saida: AnalysisOut) -> dict:
         "colors": objective_colors(saida.objective, is_long=saida.is_long),
         "forecast": _forecast_payload(saida),
         "financial": _financial_payload(saida),
-        # Separado da previsao de proposito: e classificacao de contexto,
-        # em modo observacao, e nao entra nas probabilidades.
+        # Separado da previsao de proposito: e classificacao de CONTEXTO
+        # (titulos de evento economico), em modo observacao, e nao entra
+        # nas probabilidades. `available=false` com `reason` distingue
+        # "desligado" de "sem evento" de "falhou" — os tres desenham a
+        # mesma coisa e pedem acoes diferentes.
         "jev": {
-            "state": saida.jev_state,
+            "available": saida.jev_available,
+            "category": saida.jev_state,
             "confidence": saida.jev_confidence,
+            "needs_review": saida.jev_needs_review,
+            "reason": saida.jev_reason,
+            "model": saida.jev_model,
             "observation_only": saida.jev_observation_only,
         },
         "analysis_valid_until": (

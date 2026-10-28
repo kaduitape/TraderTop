@@ -16,6 +16,7 @@ import threading
 from app.core.config import Settings, get_settings
 from app.jev.cache import TTLCache
 from app.jev.client import JevClient, JevUnavailable
+from app.jev.hedge_context import HedgeContextAssessment, HedgeContextAssessor
 from app.jev.pulse_assessment import PulseAssessment, PulseAssessor
 
 _lock = threading.Lock()
@@ -77,3 +78,58 @@ def reset_pulse_assessor() -> None:
     with _lock:
         _assessor = None
         _built_from = None
+
+
+# --- classificador de contexto do Hedge ------------------------------------
+
+_context_assessor: HedgeContextAssessor | None = None
+_context_built_from: tuple | None = None
+
+
+def get_context_assessor(settings: Settings | None = None) -> HedgeContextAssessor | None:
+    """O classificador de contexto do Hedge, ou None quando desligado.
+
+    Compartilhado pelo processo, pelo mesmo motivo do avaliador do Pulso:
+    um classificador novo a cada requisicao teria cache novo a cada
+    requisicao — ou seja, cache nenhum, e uma chamada paga a cada snapshot
+    do conector.
+    """
+    global _context_assessor, _context_built_from
+
+    resolvidas = settings or get_settings()
+    if not resolvidas.jev_enabled or not resolvidas.jev_api_key:
+        return None
+
+    assinatura = (*_signature(resolvidas), resolvidas.jev_daily_call_budget)
+    with _lock:
+        if _context_assessor is not None and _context_built_from == assinatura:
+            return _context_assessor
+
+        try:
+            cliente = JevClient(
+                api_key=resolvidas.jev_api_key,
+                base_url=resolvidas.jev_api_base_url,
+                model=resolvidas.jev_model,
+                timeout_seconds=resolvidas.jev_timeout_seconds,
+            )
+        except JevUnavailable:
+            return None
+
+        _context_assessor = HedgeContextAssessor(
+            cliente,
+            cache=TTLCache[HedgeContextAssessment](
+                ttl_seconds=resolvidas.jev_cache_ttl_seconds
+            ),
+            cache_ttl_seconds=resolvidas.jev_cache_ttl_seconds,
+            daily_budget=resolvidas.jev_daily_call_budget,
+        )
+        _context_built_from = assinatura
+        return _context_assessor
+
+
+def reset_context_assessor() -> None:
+    """Esquece o classificador. Existe para o teste nao herdar cache."""
+    global _context_assessor, _context_built_from
+    with _lock:
+        _context_assessor = None
+        _context_built_from = None

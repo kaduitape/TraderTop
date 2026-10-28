@@ -30,6 +30,12 @@ from app.database.repositories.system_setting_repository import SystemSettingRep
 logger = logging.getLogger(__name__)
 
 BUDGET_SETTING = "marketpulse_daily_usage"
+"""Chave padrao: o consumo da MarketPulse.
+
+O contador e parametrizavel (`key`) porque outras integracoes pagas usam a
+mesma mecanica com teto PROPRIO. Compartilhar a chave faria o gasto de uma
+API esgotar o orcamento da outra, e o sintoma seria uma integracao se
+calando por culpa de outra."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,11 +63,17 @@ def _today(now: datetime | None = None) -> str:
     return moment.astimezone(UTC).strftime("%Y-%m-%d")
 
 
-def read_usage(session: Session, *, limit: int, now: datetime | None = None) -> BudgetUsage:
+def read_usage(
+    session: Session,
+    *,
+    limit: int,
+    now: datetime | None = None,
+    key: str = BUDGET_SETTING,
+) -> BudgetUsage:
     """Consumo de hoje. Um registro de ontem conta como zero — a virada do
     dia UTC zera sozinha, sem tarefa agendada para limpar nada."""
     day = _today(now)
-    raw = SystemSettingRepository(session).get(BUDGET_SETTING)
+    raw = SystemSettingRepository(session).get(key)
     calls = 0
     if raw:
         try:
@@ -75,14 +87,21 @@ def read_usage(session: Session, *, limit: int, now: datetime | None = None) -> 
     return BudgetUsage(day=day, calls=calls, limit=max(0, limit))
 
 
-def record_call(session: Session, *, limit: int, now: datetime | None = None) -> BudgetUsage:
+def record_call(
+    session: Session,
+    *,
+    limit: int,
+    now: datetime | None = None,
+    key: str = BUDGET_SETTING,
+    description: str = "Consumo diario da API MarketPulse (reiniciado a cada dia UTC).",
+) -> BudgetUsage:
     """Soma uma chamada ao dia corrente e devolve o consumo atualizado."""
-    usage = read_usage(session, limit=limit, now=now)
+    usage = read_usage(session, limit=limit, now=now, key=key)
     updated = BudgetUsage(day=usage.day, calls=usage.calls + 1, limit=usage.limit)
     SystemSettingRepository(session).set(
-        BUDGET_SETTING,
+        key,
         json.dumps({"day": updated.day, "calls": updated.calls}),
-        description="Consumo diario da API MarketPulse (reiniciado a cada dia UTC).",
+        description=description,
     )
     return updated
 
