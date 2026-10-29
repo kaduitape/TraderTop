@@ -48,6 +48,22 @@ def _limpa(engine):
     apagar()
 
 
+_PARAMS_MIN = {
+    "desk_symbol": "MNQ",
+    "desk_is_long": True,
+    "desk_entry": Decimal("20000"),
+    "desk_take": Decimal("20100"),
+    "desk_stop": Decimal("19950"),
+    "desk_contracts": Decimal("1"),
+    "level_unit": "PRICE",
+    "desk_tick_size": Decimal("0.25"),
+    "desk_tick_value": Decimal("0.50"),
+    "desk_point": Decimal("0.01"),
+    "broker_symbol": "MNQ",
+    "account_currency": "USD",
+}
+
+
 def _form(**overrides) -> dict:
     base = {
         "name": "Cobertura MNQ",
@@ -643,3 +659,148 @@ def test_a_failing_test_reports_without_leaking(logged_in, monkeypatch) -> None:
 
     assert "nao aceita" in resposta.text
     assert CHAVE_JEV not in resposta.text
+
+
+# --- criar x editar: eram o mesmo estado, e nao sao ------------------------
+
+
+def test_a_second_setup_can_be_created(logged_in, db_session, hedge_user) -> None:
+    """O bug que tornava o formulario confuso: `setup_id` vinha sempre
+    preenchido com o setup selecionado, entao depois do primeiro nao havia
+    como criar um segundo — todo Salvar virava uma versao nova."""
+    logged_in.post("/dashboard/hedge/setup", data=_form(name="Primeiro"), follow_redirects=True)
+    logged_in.post("/dashboard/hedge/setup", data=_form(name="Segundo"), follow_redirects=True)
+
+    nomes = {s.name for s in HedgeRepository(db_session).list_setups(user_id=hedge_user)}
+
+    assert nomes == {"Primeiro", "Segundo"}
+
+
+def test_the_form_creates_by_default(logged_in) -> None:
+    """Sem `?edit=`, o formulario cria. Ele nao pode vir preso a um setup
+    so porque existe um na lista."""
+    logged_in.post("/dashboard/hedge/setup", data=_form(name="Existente"), follow_redirects=True)
+
+    html = logged_in.get("/dashboard/hedge").text
+
+    assert "Novo setup" in html
+    assert 'name="setup_id"' not in html.split('id="setup-form"')[1].split("</form>")[0]
+
+
+def test_edit_mode_is_explicit_and_cancellable(logged_in, db_session, hedge_user) -> None:
+    logged_in.post("/dashboard/hedge/setup", data=_form(name="Alvo"), follow_redirects=True)
+    setup = HedgeRepository(db_session).list_setups(user_id=hedge_user)[0]
+
+    html = logged_in.get(f"/dashboard/hedge?edit={setup.id}").text
+
+    assert "Editando" in html
+    assert "Alvo" in html
+    assert f'name="setup_id" value="{setup.id}"' in html
+    assert "cancelar" in html
+
+
+def test_the_button_says_which_version_it_will_create(logged_in, db_session, hedge_user) -> None:
+    """"Salvar" sozinho nao diz que o resultado e uma versao nova."""
+    logged_in.post("/dashboard/hedge/setup", data=_form(name="Alvo"), follow_redirects=True)
+    setup = HedgeRepository(db_session).list_setups(user_id=hedge_user)[0]
+
+    html = logged_in.get(f"/dashboard/hedge?edit={setup.id}").text
+
+    assert "Salvar versão 2" in html
+
+
+def test_renaming_on_edit_actually_renames(logged_in, db_session, hedge_user) -> None:
+    """Antes o campo aceitava o texto novo, a tela confirmava o salvamento
+    e o nome continuava o antigo — sem erro, sem aviso."""
+    logged_in.post("/dashboard/hedge/setup", data=_form(name="Nome antigo"), follow_redirects=True)
+    repo = HedgeRepository(db_session)
+    setup = repo.list_setups(user_id=hedge_user)[0]
+
+    logged_in.post(
+        "/dashboard/hedge/setup",
+        data=_form(name="Nome novo", setup_id=str(setup.id)),
+        follow_redirects=True,
+    )
+
+    db_session.expire_all()
+    assert repo.get_setup(setup.id, user_id=hedge_user).name == "Nome novo"
+
+
+def test_a_closed_setup_falls_back_to_create_mode(logged_in, db_session, hedge_user) -> None:
+    """Encerrado nao recebe alteracao. Abrir o formulario nele deixaria o
+    operador preencher tudo para receber um erro no fim."""
+    logged_in.post("/dashboard/hedge/setup", data=_form(name="Fechado"), follow_redirects=True)
+    setup = HedgeRepository(db_session).list_setups(user_id=hedge_user)[0]
+    logged_in.post(
+        "/dashboard/hedge/setup/close", data={"setup_id": setup.id}, follow_redirects=True
+    )
+
+    html = logged_in.get(f"/dashboard/hedge?edit={setup.id}").text
+
+    assert "Novo setup" in html
+    assert "Editando" not in html
+
+
+def test_another_users_setup_cannot_be_edited(logged_in, db_session, hedge_user) -> None:
+    """`?edit=` e um parametro da URL: trocar o numero nao pode abrir o
+    setup de outra pessoa."""
+    from app.core.security import hash_password
+    from app.database.repositories.user_repository import UserRepository
+
+    outro = UserRepository(db_session).create_user(
+        username="hedge_outro_dono",
+        email="outro@example.com",
+        password_hash=hash_password("Sup3rSecret!"),
+    )
+    db_session.commit()
+    alheio, _ = HedgeRepository(db_session).create_setup(
+        user_id=outro.id, name="Do outro", mode="SIMULATION",
+        objective="FAVOR_DESK_TAKE", params=_PARAMS_MIN,
+    )
+    db_session.commit()
+
+    html = logged_in.get(f"/dashboard/hedge?edit={alheio.id}").text
+
+    assert "Do outro" not in html
+    assert "Editando" not in html
+
+
+def test_browsing_history_does_not_put_the_form_in_edit_mode(logged_in, db_session, hedge_user) -> None:
+    """`?setup=` escolhe o que o HISTORICO mostra; `?edit=` o que o
+    formulario altera. Eram a mesma coisa."""
+    logged_in.post("/dashboard/hedge/setup", data=_form(name="Olhando"), follow_redirects=True)
+    setup = HedgeRepository(db_session).list_setups(user_id=hedge_user)[0]
+
+    html = logged_in.get(f"/dashboard/hedge?setup={setup.id}").text
+
+    assert "Novo setup" in html
+    assert "Editando" not in html
+
+
+# --- o formulario em si -----------------------------------------------------
+
+
+def test_the_advanced_fields_are_collapsed_when_creating(logged_in) -> None:
+    """Vinte e tres campos de uma vez sao a definicao de confuso. O
+    essencial fica visivel; especificacao, custos e prazo ficam atras de
+    um `details`."""
+    html = logged_in.get("/dashboard/hedge").text
+
+    assert "Ajustes avançados" in html
+    assert "<details" in html
+
+
+def test_the_conversion_preview_exists(logged_in) -> None:
+    """A conversao precisa aparecer ENQUANTO se digita: depois de salvar
+    o operador ja confirmou um nivel sem saber em que preço ele cai."""
+    html = logged_in.get("/dashboard/hedge").text
+
+    assert 'id="preview"' in html
+    assert 'id="pv-take"' in html
+
+
+def test_the_tick_versus_point_trap_is_explained_where_it_is_set(logged_in) -> None:
+    html = logged_in.get("/dashboard/hedge").text
+
+    assert "menor passo negociável" in html
+    assert "25×" in html

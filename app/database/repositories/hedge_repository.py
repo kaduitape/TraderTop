@@ -99,8 +99,14 @@ class HedgeRepository:
         user_id: int,
         mode: str | None = None,
         objective: str | None = None,
+        name: str | None = None,
     ) -> HedgeSetupVersion:
-        """Grava uma versao nova e aponta o setup para ela."""
+        """Grava uma versao nova e aponta o setup para ela.
+
+        O NOME tambem e atualizavel. Antes nao era, e o efeito era pior que
+        a falta: o campo aceitava o texto novo, a tela confirmava o salvamento
+        e o nome continuava o antigo — sem erro, sem aviso.
+        """
         proxima = setup.current_version + 1
         versao = HedgeSetupVersion(
             setup_id=setup.id,
@@ -115,6 +121,8 @@ class HedgeRepository:
             setup.mode = mode
         if objective is not None:
             setup.objective = objective
+        if name is not None and name.strip():
+            setup.name = name.strip()[:120]
         self._session.flush()
         return versao
 

@@ -149,6 +149,10 @@
                                         <a class="btn btn-sm btn-outline-light"
                                            href="/dashboard/hedge?setup={{ row.setup.id }}#hist">ver</a>
                                         {% if not row.setup.closed_at %}
+                                        <a class="btn btn-sm btn-outline-primary"
+                                           href="/dashboard/hedge?edit={{ row.setup.id }}#form">editar</a>
+                                        {% endif %}
+                                        {% if not row.setup.closed_at %}
                                         <form method="post" action="/dashboard/hedge/setup/close" class="d-inline">
                                             <input type="hidden" name="setup_id" value="{{ row.setup.id }}">
                                             <button class="btn btn-sm btn-outline-danger"
@@ -196,199 +200,257 @@
             </div>
 
             <div class="col-xl-5">
-                <section class="card">
-                    <div class="card-header"><i class="bi bi-plus-square me-2"></i>Novo setup / nova versão</div>
-                    <form method="post" action="/dashboard/hedge/setup" class="card-body">
+                <section class="card" id="form">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        {% if editing %}
+                        <span><i class="bi bi-pencil me-2"></i>Editando <strong>{{ editing.name }}</strong></span>
+                        <a class="btn btn-sm btn-outline-light" href="/dashboard/hedge#form">cancelar</a>
+                        {% else %}
+                        <span><i class="bi bi-plus-square me-2"></i>Novo setup</span>
+                        {% endif %}
+                    </div>
+
+                    {% if editing %}
+                    <div class="alert alert-info rounded-0 border-0 mb-0 small">
+                        Salvar cria a <strong>versão {{ editing.current_version + 1 }}</strong>.
+                        A versão atual fica no histórico — as análises já feitas continuam
+                        apontando para ela.
+                    </div>
+                    {% endif %}
+
+                    <form method="post" action="/dashboard/hedge/setup" class="card-body" id="setup-form">
+                        {% if editing %}<input type="hidden" name="setup_id" value="{{ editing.id }}">{% endif %}
+                        {% set v = editing_version %}
+
                         <div class="mb-3">
-                            <label class="form-label small">Nome</label>
-                            <input class="form-control" name="name" required maxlength="120"
-                                   value="{{ selected.name if selected }}">
-                        </div>
-                        <input type="hidden" name="setup_id" value="{{ selected.id if selected }}">
-
-                        <h6 class="text-uppercase small text-muted mt-3">Operação na mesa</h6>
-                        <div class="row g-2">
-                            <div class="col-7">
-                                <label class="form-label small">Ativo (mesa)</label>
-                                <input class="form-control" name="desk_symbol" required
-                                       value="{{ selected_version.desk_symbol if selected_version }}">
-                            </div>
-                            <div class="col-5">
-                                <label class="form-label small">Direção</label>
-                                <select class="form-select" name="desk_direction">
-                                    <option value="LONG" {% if selected_version and selected_version.desk_is_long %}selected{% endif %}>Compra</option>
-                                    <option value="SHORT" {% if selected_version and not selected_version.desk_is_long %}selected{% endif %}>Venda</option>
-                                </select>
-                            </div>
-                            <div class="col-12">
-                                <label class="form-label small">Unidade dos níveis</label>
-                                <select class="form-select" name="level_unit">
-                                    {% for u in level_units %}
-                                    <option value="{{ u.value }}"
-                                        {% if selected_version and selected_version.level_unit == u.value %}selected{% endif %}>
-                                        {{ {'PRICE':'Preço absoluto','TICKS':'Ticks','POINTS':'Pontos','MONEY':'Valor financeiro'}[u.value] }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                                <div class="form-text">
-                                    Ticks e pontos são coisas diferentes: no MNQ o tick vale 0,25 e o ponto 0,01.
-                                    O nível resultante em preço aparece na tabela depois de salvar.
-                                </div>
-                            </div>
-                            <div class="col-4">
-                                <label class="form-label small">Entrada</label>
-                                <input class="form-control" name="desk_entry" required
-                                       value="{{ selected_version.desk_entry if selected_version }}">
-                            </div>
-                            <div class="col-4">
-                                <label class="form-label small">Take</label>
-                                <input class="form-control" name="desk_take" required
-                                       value="{{ selected_version.desk_take if selected_version }}">
-                            </div>
-                            <div class="col-4">
-                                <label class="form-label small">Stop</label>
-                                <input class="form-control" name="desk_stop" required
-                                       value="{{ selected_version.desk_stop if selected_version }}">
-                            </div>
-                            <div class="col-4">
-                                <label class="form-label small">Contratos</label>
-                                <input class="form-control" name="desk_contracts"
-                                       value="{{ selected_version.desk_contracts if selected_version else '1' }}">
-                            </div>
-                            <div class="col-4">
-                                <label class="form-label small">Tick size</label>
-                                <input class="form-control" name="desk_tick_size"
-                                       value="{{ selected_version.desk_tick_size if selected_version else '0.25' }}">
-                            </div>
-                            <div class="col-4">
-                                <label class="form-label small">Tick value</label>
-                                <input class="form-control" name="desk_tick_value"
-                                       value="{{ selected_version.desk_tick_value if selected_version else '0.50' }}">
-                            </div>
-                            <div class="col-4">
-                                <label class="form-label small">Point</label>
-                                <input class="form-control" name="desk_point"
-                                       value="{{ selected_version.desk_point if selected_version else '0.01' }}">
-                            </div>
-                            <div class="col-4">
-                                <label class="form-label small">Comissão</label>
-                                <input class="form-control" name="desk_commission"
-                                       value="{{ selected_version.desk_commission if selected_version else '0' }}">
-                            </div>
-                            <div class="col-4">
-                                <label class="form-label small">Slippage (preço)</label>
-                                <input class="form-control" name="desk_slippage"
-                                       value="{{ selected_version.desk_slippage if selected_version else '0' }}">
-                            </div>
+                            <label class="form-label small" for="f-name">Nome do setup</label>
+                            <input class="form-control" id="f-name" name="name" required maxlength="120"
+                                   placeholder="Cobertura MNQ manhã"
+                                   value="{{ editing.name if editing }}">
                         </div>
 
-                        <h6 class="text-uppercase small text-muted mt-4">Cobertura na corretora</h6>
+                        {# ---------- o essencial ---------- #}
                         <div class="row g-2">
-                            <div class="col-7">
-                                <label class="form-label small">Símbolo no MT5</label>
-                                <input class="form-control" name="broker_symbol" required list="simbolos"
-                                       value="{{ selected_version.broker_symbol if selected_version }}">
+                            <div class="col-8">
+                                <label class="form-label small" for="f-desk">Ativo na mesa</label>
+                                <input class="form-control" id="f-desk" name="desk_symbol" required
+                                       placeholder="MNQ" value="{{ v.desk_symbol if v }}">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small" for="f-dir">Direção</label>
+                                <select class="form-select" id="f-dir" name="desk_direction">
+                                    <option value="LONG" {% if not v or v.desk_is_long %}selected{% endif %}>Compra</option>
+                                    <option value="SHORT" {% if v and not v.desk_is_long %}selected{% endif %}>Venda</option>
+                                </select>
+                            </div>
+
+                            <div class="col-8">
+                                <label class="form-label small" for="f-broker">Símbolo no MT5 (cobertura)</label>
+                                <input class="form-control" id="f-broker" name="broker_symbol" required list="simbolos"
+                                       placeholder="MNQZ5" value="{{ v.broker_symbol if v }}">
                                 <datalist id="simbolos">
                                     {% for s in symbols %}<option value="{{ s.name }}">{% endfor %}
                                 </datalist>
                             </div>
-                            <div class="col-5">
-                                <label class="form-label small">Moeda da conta</label>
-                                <input class="form-control" name="account_currency"
-                                       value="{{ selected_version.account_currency if selected_version else 'USD' }}">
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label small">Proporção de cobertura</label>
-                                <input class="form-control" name="coverage_ratio"
-                                       value="{{ selected_version.coverage_ratio if selected_version else '1' }}">
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label small">Razão de preço</label>
-                                <input class="form-control" name="price_ratio" placeholder="vazio = mesmo ativo"
-                                       value="{{ selected_version.price_ratio if selected_version and selected_version.price_ratio is not none }}">
-                                <div class="form-text">
-                                    Obrigatória quando os instrumentos são diferentes. O sistema não assume
-                                    equivalência entre futuro e CFD.
-                                </div>
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label small">Comissão</label>
-                                <input class="form-control" name="broker_commission"
-                                       value="{{ selected_version.broker_commission if selected_version else '0' }}">
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label small">Slippage (preço)</label>
-                                <input class="form-control" name="broker_slippage"
-                                       value="{{ selected_version.broker_slippage if selected_version else '0' }}">
+                            <div class="col-4">
+                                <label class="form-label small" for="f-contracts">Contratos</label>
+                                <input class="form-control" id="f-contracts" name="desk_contracts"
+                                       value="{{ v.desk_contracts if v else '1' }}">
                             </div>
                         </div>
 
-                        <h6 class="text-uppercase small text-muted mt-4">Objetivo, modo e prazo</h6>
+                        <hr class="my-3">
+
                         <div class="row g-2">
                             <div class="col-12">
-                                <label class="form-label small">Objetivo</label>
-                                <select class="form-select" name="objective">
-                                    <option value="FAVOR_DESK_TAKE"
-                                        {% if selected and selected.objective == 'FAVOR_DESK_TAKE' %}selected{% endif %}>
-                                        Favorecer take da mesa
-                                    </option>
-                                    <option value="FAVOR_BROKER_PROFIT"
-                                        {% if selected and selected.objective == 'FAVOR_BROKER_PROFIT' %}selected{% endif %}>
-                                        Favorecer stop da mesa / lucro na corretora
-                                    </option>
-                                </select>
-                                <div class="form-text">
-                                    Muda a leitura e as cores do gráfico. <strong>Nunca</strong> altera a
-                                    previsão nem o resultado: preferir um cenário não o torna mais provável.
-                                </div>
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label small">Modo</label>
-                                <select class="form-select" name="mode">
-                                    <option value="SIMULATION" {% if selected and selected.mode == 'SIMULATION' %}selected{% endif %}>Simulação de entrada</option>
-                                    <option value="TRACKING" {% if selected and selected.mode == 'TRACKING' %}selected{% endif %}>Acompanhamento de operação aberta</option>
+                                <label class="form-label small" for="f-unit">Como você informa os níveis</label>
+                                <select class="form-select" id="f-unit" name="level_unit">
+                                    <option value="PRICE"  {% if not v or v.level_unit == 'PRICE'  %}selected{% endif %}>Preço absoluto</option>
+                                    <option value="TICKS"  {% if v and v.level_unit == 'TICKS'  %}selected{% endif %}>Distância em ticks</option>
+                                    <option value="POINTS" {% if v and v.level_unit == 'POINTS' %}selected{% endif %}>Distância em pontos</option>
+                                    <option value="MONEY"  {% if v and v.level_unit == 'MONEY'  %}selected{% endif %}>Valor em dinheiro</option>
                                 </select>
                             </div>
-                            <div class="col-6">
-                                <label class="form-label small">Horizonte (min)</label>
-                                <input class="form-control" name="horizon_minutes"
-                                       value="{{ (selected_version.horizon_seconds // 60) if selected_version else 60 }}">
+                            <div class="col-4">
+                                <label class="form-label small" for="f-entry">Entrada</label>
+                                <input class="form-control" id="f-entry" name="desk_entry" required
+                                       value="{{ v.desk_entry if v }}">
                             </div>
-                            <div class="col-6">
-                                <label class="form-label small">Fuso de exibição</label>
-                                <input class="form-control" name="display_timezone"
-                                       value="{{ selected_version.display_timezone if selected_version else 'UTC' }}">
-                                <div class="form-text">Internamente tudo é UTC.</div>
+                            <div class="col-4">
+                                <label class="form-label small text-success" for="f-take">Take</label>
+                                <input class="form-control" id="f-take" name="desk_take" required
+                                       value="{{ v.desk_take if v }}">
                             </div>
-                            <div class="col-6">
-                                <label class="form-label small">Validade do dado (s)</label>
-                                <input class="form-control" name="data_max_age_seconds"
-                                       value="{{ selected_version.data_max_age_seconds if selected_version else 30 }}">
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label small">Ticket MT5 (opcional)</label>
-                                <input class="form-control" name="mt5_position_ticket"
-                                       value="{{ selected_version.mt5_position_ticket if selected_version and selected_version.mt5_position_ticket }}">
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label small">Referência na mesa</label>
-                                <input class="form-control" name="desk_reference"
-                                       value="{{ selected_version.desk_reference if selected_version and selected_version.desk_reference }}">
-                                <div class="form-text">
-                                    Anotação sua. O sistema não verifica se essa posição existe.
-                                </div>
-                            </div>
-                            <div class="col-12">
-                                <label class="form-label small">Motivo da alteração</label>
-                                <input class="form-control" name="change_note"
-                                       placeholder="obrigatório na prática: fica no histórico de versões">
+                            <div class="col-4">
+                                <label class="form-label small text-danger" for="f-stop">Stop</label>
+                                <input class="form-control" id="f-stop" name="desk_stop" required
+                                       value="{{ v.desk_stop if v }}">
                             </div>
                         </div>
 
+                        {# A conversao aparece ENQUANTO se digita. Depois de salvar
+                           seria tarde: o operador ja teria confirmado um nivel sem
+                           saber em que preco ele cai. #}
+                        <div class="alert alert-secondary py-2 px-3 mt-2 mb-0 small d-none" id="preview">
+                            <i class="bi bi-arrow-right-short"></i>
+                            take <strong id="pv-take">—</strong> ·
+                            stop <strong id="pv-stop">—</strong>
+                        </div>
+
+                        <div class="mt-3">
+                            <label class="form-label small" for="f-obj">Objetivo</label>
+                            <select class="form-select" id="f-obj" name="objective">
+                                <option value="FAVOR_DESK_TAKE"
+                                    {% if not editing or editing.objective == 'FAVOR_DESK_TAKE' %}selected{% endif %}>
+                                    Quero o take da mesa
+                                </option>
+                                <option value="FAVOR_BROKER_PROFIT"
+                                    {% if editing and editing.objective == 'FAVOR_BROKER_PROFIT' %}selected{% endif %}>
+                                    Quero o stop da mesa (lucro na corretora)
+                                </option>
+                            </select>
+                            <div class="form-text">Muda as cores do gráfico. Não muda nenhum número.</div>
+                        </div>
+
+                        {# ---------- o resto, recolhido ---------- #}
+                        <details class="mt-3" {% if editing %}open{% endif %}>
+                            <summary class="small text-muted mb-2" style="cursor:pointer">
+                                Ajustes avançados — especificação, custos, prazo
+                            </summary>
+
+                            <div class="row g-2 mt-1">
+                                <div class="col-12"><span class="text-uppercase small text-muted">Contrato da mesa</span></div>
+                                <div class="col-4">
+                                    <label class="form-label small" for="f-ts">Tick size</label>
+                                    <input class="form-control form-control-sm" id="f-ts" name="desk_tick_size"
+                                           value="{{ v.desk_tick_size if v else '0.25' }}">
+                                </div>
+                                <div class="col-4">
+                                    <label class="form-label small" for="f-tv">Tick value</label>
+                                    <input class="form-control form-control-sm" id="f-tv" name="desk_tick_value"
+                                           value="{{ v.desk_tick_value if v else '0.50' }}">
+                                </div>
+                                <div class="col-4">
+                                    <label class="form-label small" for="f-pt">Point</label>
+                                    <input class="form-control form-control-sm" id="f-pt" name="desk_point"
+                                           value="{{ v.desk_point if v else '0.01' }}">
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-text mt-0">
+                                        <strong>Tick</strong> é o menor passo negociável; <strong>point</strong>
+                                        é a casa decimal. No MNQ valem 0,25 e 0,01 — 25× de diferença.
+                                        <strong>Tick value</strong> é quanto vale um tick em dinheiro, por contrato.
+                                    </div>
+                                </div>
+
+                                <div class="col-12 mt-2"><span class="text-uppercase small text-muted">Custos</span></div>
+                                <div class="col-3">
+                                    <label class="form-label small" for="f-dc">Comissão mesa</label>
+                                    <input class="form-control form-control-sm" id="f-dc" name="desk_commission"
+                                           value="{{ v.desk_commission if v else '0' }}">
+                                </div>
+                                <div class="col-3">
+                                    <label class="form-label small" for="f-ds">Slip. mesa</label>
+                                    <input class="form-control form-control-sm" id="f-ds" name="desk_slippage"
+                                           value="{{ v.desk_slippage if v else '0' }}">
+                                </div>
+                                <div class="col-3">
+                                    <label class="form-label small" for="f-bc">Comissão corr.</label>
+                                    <input class="form-control form-control-sm" id="f-bc" name="broker_commission"
+                                           value="{{ v.broker_commission if v else '0' }}">
+                                </div>
+                                <div class="col-3">
+                                    <label class="form-label small" for="f-bs">Slip. corr.</label>
+                                    <input class="form-control form-control-sm" id="f-bs" name="broker_slippage"
+                                           value="{{ v.broker_slippage if v else '0' }}">
+                                </div>
+
+                                <div class="col-12 mt-2"><span class="text-uppercase small text-muted">Cobertura</span></div>
+                                <div class="col-4">
+                                    <label class="form-label small" for="f-cov">Proporção</label>
+                                    <input class="form-control form-control-sm" id="f-cov" name="coverage_ratio"
+                                           value="{{ v.coverage_ratio if v else '1' }}">
+                                </div>
+                                <div class="col-4">
+                                    <label class="form-label small" for="f-pr">Razão de preço</label>
+                                    <input class="form-control form-control-sm" id="f-pr" name="price_ratio"
+                                           placeholder="mesmo ativo"
+                                           value="{{ v.price_ratio if v and v.price_ratio is not none }}">
+                                </div>
+                                <div class="col-4">
+                                    <label class="form-label small" for="f-cur">Moeda</label>
+                                    <input class="form-control form-control-sm" id="f-cur" name="account_currency"
+                                           value="{{ v.account_currency if v else 'USD' }}">
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-text mt-0">
+                                        Razão de preço só é obrigatória quando os instrumentos são
+                                        diferentes — o sistema não assume que futuro e CFD andam igual.
+                                    </div>
+                                </div>
+
+                                <div class="col-12 mt-2"><span class="text-uppercase small text-muted">Prazo e modo</span></div>
+                                <div class="col-4">
+                                    <label class="form-label small" for="f-hor">Horizonte (min)</label>
+                                    <input class="form-control form-control-sm" id="f-hor" name="horizon_minutes"
+                                           value="{{ (v.horizon_seconds // 60) if v else 60 }}">
+                                </div>
+                                <div class="col-4">
+                                    <label class="form-label small" for="f-age">Validade (s)</label>
+                                    <input class="form-control form-control-sm" id="f-age" name="data_max_age_seconds"
+                                           value="{{ v.data_max_age_seconds if v else 30 }}">
+                                </div>
+                                <div class="col-4">
+                                    <label class="form-label small" for="f-tz">Fuso</label>
+                                    <input class="form-control form-control-sm" id="f-tz" name="display_timezone"
+                                           value="{{ v.display_timezone if v else 'UTC' }}">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label small" for="f-mode">Modo</label>
+                                    <select class="form-select form-select-sm" id="f-mode" name="mode">
+                                        <option value="SIMULATION" {% if not editing or editing.mode == 'SIMULATION' %}selected{% endif %}>
+                                            Simulação — ainda não entrei
+                                        </option>
+                                        <option value="TRACKING" {% if editing and editing.mode == 'TRACKING' %}selected{% endif %}>
+                                            Acompanhamento — já estou posicionado
+                                        </option>
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small" for="f-tk">Ticket MT5</label>
+                                    <input class="form-control form-control-sm" id="f-tk" name="mt5_position_ticket"
+                                           placeholder="opcional"
+                                           value="{{ v.mt5_position_ticket if v and v.mt5_position_ticket }}">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small" for="f-ref">Referência na mesa</label>
+                                    <input class="form-control form-control-sm" id="f-ref" name="desk_reference"
+                                           placeholder="opcional"
+                                           value="{{ v.desk_reference if v and v.desk_reference }}">
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-text mt-0">
+                                        A referência é uma anotação sua. O sistema não verifica se
+                                        essa posição existe.
+                                    </div>
+                                </div>
+
+                                {% if editing %}
+                                <div class="col-12 mt-2">
+                                    <label class="form-label small" for="f-note">Motivo da alteração</label>
+                                    <input class="form-control form-control-sm" id="f-note" name="change_note"
+                                           placeholder="fica no histórico de versões">
+                                </div>
+                                {% endif %}
+                            </div>
+                        </details>
+
                         <button class="btn btn-primary w-100 mt-4" type="submit">
-                            <i class="bi bi-save me-1"></i>Salvar
+                            <i class="bi bi-save me-1"></i>
+                            {% if editing %}Salvar versão {{ editing.current_version + 1 }}{% else %}Criar setup{% endif %}
                         </button>
                     </form>
+                </section>
                 </section>
             </div>
         </div>
@@ -794,4 +856,71 @@
 
     </div>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Previa da conversao enquanto se digita.
+//
+// A regra de conversao vive no servidor (`app/hedge/units.py`), que e quem
+// grava. Isto aqui e so ESPELHO: se as duas divergirem, quem manda e o que
+// foi salvo, e o rotulo diz "aproximado" para nao prometer precisao que
+// este calculo nao garante.
+//
+// Existe porque a alternativa e o operador confirmar "400 ticks" sem saber
+// em que preco isso cai, e descobrir depois de salvo.
+(function () {
+  var f = document.getElementById('setup-form');
+  if (!f) return;
+
+  var campos = ['f-unit', 'f-entry', 'f-take', 'f-stop', 'f-dir', 'f-ts', 'f-pt', 'f-tv', 'f-contracts']
+    .map(function (id) { return document.getElementById(id); });
+  var box = document.getElementById('preview');
+  var saidaTake = document.getElementById('pv-take');
+  var saidaStop = document.getElementById('pv-stop');
+  if (!box) return;
+
+  function num(el) { return el ? parseFloat(String(el.value).replace(',', '.')) : NaN; }
+
+  function nivel(valor, unidade, entrada, ladoLucro, comprado, tick, ponto, tickValue, qtd) {
+    if (unidade === 'PRICE') return valor;
+    var dist;
+    if (unidade === 'TICKS') dist = valor * tick;
+    else if (unidade === 'POINTS') dist = valor * ponto;
+    else if (unidade === 'MONEY') {
+      var porUnidade = tickValue / tick;
+      if (!(porUnidade > 0) || !(qtd > 0)) return NaN;
+      dist = valor / (porUnidade * qtd);
+    } else return NaN;
+    dist = Math.abs(dist);
+    var sobe = ladoLucro ? comprado : !comprado;
+    return sobe ? entrada + dist : entrada - dist;
+  }
+
+  function atualizar() {
+    var unidade = document.getElementById('f-unit').value;
+    if (unidade === 'PRICE') { box.classList.add('d-none'); return; }
+
+    var entrada = num(document.getElementById('f-entry'));
+    var comprado = document.getElementById('f-dir').value === 'LONG';
+    var tick = num(document.getElementById('f-ts'));
+    var ponto = num(document.getElementById('f-pt'));
+    var tv = num(document.getElementById('f-tv'));
+    var qtd = num(document.getElementById('f-contracts'));
+
+    var take = nivel(num(document.getElementById('f-take')), unidade, entrada, true, comprado, tick, ponto, tv, qtd);
+    var stop = nivel(num(document.getElementById('f-stop')), unidade, entrada, false, comprado, tick, ponto, tv, qtd);
+
+    if (!isFinite(take) && !isFinite(stop)) { box.classList.add('d-none'); return; }
+    saidaTake.textContent = isFinite(take) ? take.toFixed(5).replace(/0+$/, '').replace(/\.$/, '') : '—';
+    saidaStop.textContent = isFinite(stop) ? stop.toFixed(5).replace(/0+$/, '').replace(/\.$/, '') : '—';
+    box.classList.remove('d-none');
+  }
+
+  campos.forEach(function (el) {
+    if (el) { el.addEventListener('input', atualizar); el.addEventListener('change', atualizar); }
+  });
+  atualizar();
+})();
+</script>
 {% endblock %}

@@ -84,6 +84,7 @@ def dashboard_hedge(
     error: str | None = None,
     new_key: str | None = None,
     setup: int | None = None,
+    edit: int | None = None,
     user: User = Depends(get_current_user_for_web),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
@@ -91,17 +92,32 @@ def dashboard_hedge(
 
     `new_key` chega pela URL de um redirect imediatamente apos a criacao e
     some na proxima navegacao. E a unica vez que o segredo aparece.
+
+    `setup` escolhe qual setup o HISTORICO mostra; `edit` escolhe qual o
+    FORMULARIO altera. Eram a mesma coisa, e o resultado era que o
+    formulario vinha sempre preenchido com o setup selecionado e preso a
+    ele: depois do primeiro, nao havia como criar um segundo — todo
+    "Salvar" virava uma versao nova do que estava na tela.
     """
     repo = HedgeRepository(db)
     settings = get_settings()
     agora = datetime.now(UTC)
 
     setups = repo.list_setups(user_id=user.id)
+
+    # Qual setup o historico mostra.
     selecionado = None
     if setup is not None:
         selecionado = repo.get_setup(setup, user_id=user.id)
     if selecionado is None and setups:
         selecionado = setups[0]
+
+    # Qual setup o formulario altera. `None` significa CRIAR, que e o
+    # padrao: so se entra em edicao clicando "editar" numa linha.
+    editando = repo.get_setup(edit, user_id=user.id) if edit is not None else None
+    if editando is not None and editando.closed_at is not None:
+        editando = None   # encerrado nao recebe alteracao; o form volta a criar
+    versao_editada = repo.current_version(editando) if editando else None
 
     linhas = []
     for item in setups:
@@ -140,6 +156,8 @@ def dashboard_hedge(
             "rows": linhas,
             "selected": selecionado,
             "selected_version": repo.current_version(selecionado) if selecionado else None,
+            "editing": editando,
+            "editing_version": versao_editada,
             "versions": versoes,
             "history": historico,
             "sessions": sessoes,
@@ -310,6 +328,7 @@ def hedge_setup_save(
             user_id=user.id,
             mode=mode,
             objective=objective,
+            name=name,
         )
         AuditLogRepository(db).record(
             action="hedge_setup_version",
