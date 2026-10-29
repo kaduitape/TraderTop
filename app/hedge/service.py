@@ -460,9 +460,13 @@ class HedgeService:
         motor financeiro e a previsao ja estao prontos e seguem.
         """
         try:
+            from app.jev.api_settings import load_jev_settings
             from app.jev.factory import get_context_assessor
 
-            classificador = get_context_assessor(self._settings)
+            # A configuracao vem do banco sobrepondo o `.env`, para que a
+            # chave posta no painel valha sem reiniciar o container.
+            vigente = load_jev_settings(self._session, self._settings)
+            classificador = get_context_assessor(self._settings, runtime=vigente)
             if classificador is None:
                 return None
 

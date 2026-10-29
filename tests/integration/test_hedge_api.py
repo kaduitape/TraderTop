@@ -755,7 +755,11 @@ def _liga_jev(monkeypatch, handler, *, eventos=None):
         cache_ttl_seconds=300,
         daily_budget=100,
     )
-    monkeypatch.setattr(factory, "get_context_assessor", lambda settings=None: classificador)
+    monkeypatch.setattr(
+        factory,
+        "get_context_assessor",
+        lambda settings=None, **_kwargs: classificador,
+    )
 
     # O calendario real le arquivo; aqui o contexto e injetado direto.
     from app.hedge import service as servico

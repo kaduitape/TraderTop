@@ -635,20 +635,30 @@
     </div>
 
     {# ---------- 6. JEV ---------- #}
-    <div class="tab-pane fade" id="tab-jev" role="tabpanel">
+    <div class="tab-pane fade" id="tab-jev" role="tabpanel"><span id="jev"></span>
         <section class="card">
             <div class="card-header"><i class="bi bi-cpu me-2"></i>Classificação de contexto (JEV)</div>
             <div class="card-body">
                 <div class="row g-3 mb-3">
                     <div class="col-sm-6 col-lg-3">
                         <span class="text-muted small">Estado</span>
-                        <div class="fw-bold {% if jev_enabled %}text-success{% else %}text-secondary{% endif %}">
-                            {{ 'ligado' if jev_enabled else 'desligado' }}
+                        <div class="fw-bold {% if jev.active %}text-success{% elif jev.enabled %}text-warning{% else %}text-secondary{% endif %}">
+                            {% if jev.active %}ativo
+                            {% elif jev.enabled %}ligado, sem chave
+                            {% else %}desligado{% endif %}
                         </div>
+                        <div class="small text-muted">origem: {{ jev.enabled_source }}</div>
                     </div>
                     <div class="col-sm-6 col-lg-3">
                         <span class="text-muted small">Chave</span>
-                        <div class="fw-bold">{{ 'configurada' if jev_configured else 'ausente' }}</div>
+                        <div class="fw-bold">
+                            {% if jev.configured %}•••• {{ jev.key_hint }}{% else %}ausente{% endif %}
+                        </div>
+                        <div class="small text-muted">
+                            {% if jev.key_source == 'dashboard' %}cadastrada no painel
+                            {% elif jev.key_source == 'env' %}vem do .env
+                            {% else %}—{% endif %}
+                        </div>
                     </div>
                     <div class="col-sm-6 col-lg-3">
                         <span class="text-muted small">Modelo</span>
@@ -676,6 +686,56 @@
                         </div>
                     </div>
                 </div>
+
+                <form method="post" action="/dashboard/hedge/jev" class="card bg-transparent border-secondary mb-4">
+                    <div class="card-body">
+                        <h6 class="fw-bold mb-3"><i class="bi bi-key me-2"></i>Chave da API</h6>
+
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   id="jev-on" name="jev_enabled" value="1"
+                                   {% if jev.enabled %}checked{% endif %}>
+                            <label class="form-check-label" for="jev-on">
+                                Ligar a classificação de contexto
+                            </label>
+                        </div>
+
+                        <label class="form-label small" for="jev-key">Chave do Jev / TypeSafe</label>
+                        <input class="form-control" type="password" id="jev-key" name="jev_api_key"
+                               autocomplete="off" spellcheck="false"
+                               placeholder="{% if jev.configured %}deixe em branco para manter a atual{% else %}cole a chave aqui{% endif %}">
+                        <div class="form-text">
+                            Guardada <strong>cifrada</strong> no banco e nunca devolvida pela tela
+                            nem pela API. Campo em branco <strong>mantém</strong> a chave atual —
+                            salvar o liga/desliga não apaga nada.
+                        </div>
+
+                        <div class="d-flex gap-2 mt-3 flex-wrap">
+                            <button class="btn btn-primary" type="submit">
+                                <i class="bi bi-save me-1"></i>Salvar
+                            </button>
+                            <button class="btn btn-outline-light" type="submit"
+                                    formaction="/dashboard/hedge/jev/test" formnovalidate
+                                    {% if not jev.configured %}disabled{% endif %}>
+                                <i class="bi bi-plug me-1"></i>Testar conexão
+                            </button>
+                            {% if jev.key_source == 'dashboard' %}
+                            <button class="btn btn-outline-danger ms-auto" type="submit"
+                                    formaction="/dashboard/hedge/jev/remove" formnovalidate
+                                    onclick="return confirm('Remover a chave cadastrada no painel?');">
+                                <i class="bi bi-trash me-1"></i>Remover chave
+                            </button>
+                            {% endif %}
+                        </div>
+
+                        <p class="form-text mt-3 mb-0">
+                            O que está gravado aqui <strong>sobrepõe</strong> o <code>.env</code>, e vale
+                            sem reiniciar o container. As demais opções (<code>JEV_MODEL</code>,
+                            <code>JEV_TIMEOUT_SECONDS</code>, <code>JEV_CACHE_TTL_SECONDS</code>,
+                            <code>JEV_DAILY_CALL_BUDGET</code>) continuam no <code>.env</code>.
+                        </p>
+                    </div>
+                </form>
 
                 <div class="alert alert-warning">
                     <strong>Modo observação.</strong> A classificação do JEV é gravada ao lado da análise
@@ -723,9 +783,10 @@
                 <p class="small text-muted mb-0">
                     Configuração em <code>.env</code> (<code>JEV_ENABLED</code>, <code>JEV_API_KEY</code>,
                     <code>JEV_MODEL</code>, <code>JEV_TIMEOUT_SECONDS</code>,
-                    <code>JEV_CACHE_TTL_SECONDS</code>). A chave fica só no backend: não existe campo
-                    para ela no painel nem linha no banco. Se o JEV falhar, o motor financeiro e o
-                    indicador continuam funcionando.
+                    <code>JEV_CACHE_TTL_SECONDS</code>). A chave pode vir do <code>.env</code> ou
+                    deste painel — nos dois casos ela fica só no backend, nunca é devolvida pela
+                    API e nunca aparece em log. Se o JEV falhar, o motor financeiro e o indicador
+                    continuam funcionando.
                 </p>
             </div>
         </section>

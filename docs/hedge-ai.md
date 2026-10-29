@@ -301,8 +301,30 @@ Uma chave por máquina: perder o notebook custa revogar uma só.
 
 ### A chave do JEV: onde colocar
 
-Fica só no backend, no **`.env` da VPS** (`/var/www/trader-top/.env`). Não
-há campo no painel nem linha no banco, de propósito.
+Dois caminhos. O do painel é o normal; o do `.env` continua valendo.
+
+**Pelo painel** (não exige SSH): **Hedge AI → JEV → Chave da API**. Cole,
+marque "Ligar a classificação de contexto" e salve. Vale na hora, sem
+reiniciar o container, e há um botão **Testar conexão** que faz uma chamada
+real — vale a chamada, porque a alternativa é descobrir que a chave está
+errada horas depois, quando o primeiro evento econômico aparecer.
+
+A chave é guardada **cifrada** (Fernet, `app/core/crypto.py`) — não em texto
+puro como a da AIsa. Isso protege contra vazamento do **banco** isolado
+(dump, backup, replica); não protege contra quem já tem acesso ao servidor,
+porque quem lê o `.env` lê o material de cifra. É o limite de qualquer cifra
+simétrica cuja chave precisa estar disponível ao processo que decifra.
+
+Regras do campo:
+
+- O valor **nunca** volta: a tela mostra só os quatro últimos caracteres,
+  que identificam qual chave está em uso sem revelar o resto.
+- Campo em branco **mantém** a chave atual. Salvar o liga/desliga não apaga
+  a credencial — apagar exige o botão **Remover chave**, e aí volta a valer
+  o `.env`, se houver.
+- A auditoria registra a troca com os quatro últimos, nunca a chave.
+
+**Pelo `.env`** (`/var/www/trader-top/.env`):
 
 ```bash
 ssh <usuario>@<vps>
@@ -321,8 +343,9 @@ docker compose exec app python -c \
   "from app.core.config import get_settings as g; s=g(); print(s.jev_enabled, bool(s.jev_api_key))"
 ```
 
-Deve imprimir `True True`. Em **Hedge AI → JEV** o painel passa a mostrar
-"ligado" e o consumo do dia.
+Deve imprimir `True True`. O painel mostra a origem de cada um — "cadastrada
+no painel" ou "vem do .env" —, porque com os dois caminhos disponíveis saber
+qual está valendo deixa de ser óbvio.
 
 > **O `docker-compose.yml` não usa `env_file`:** ele lista as variáveis uma
 > a uma. Uma variável ausente dessa lista fica no `.env` sem efeito nenhum,

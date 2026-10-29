@@ -461,3 +461,185 @@ def test_the_panel_offers_the_download(logged_in) -> None:
 
     assert "/dashboard/hedge/download" in html
     assert "Baixar tudo" in html
+
+
+# --- chave do JEV pelo painel -----------------------------------------------
+
+CHAVE_JEV = "tsk_exemplo_de_chave_do_jev_1234567890"
+
+
+@pytest.fixture(autouse=True)
+def _limpa_jev(db_session):
+    from app.database.models.system_setting import SystemSetting
+
+    def apagar() -> None:
+        db_session.query(SystemSetting).filter(
+            SystemSetting.key.in_(("jev_api_key_encrypted", "jev_enabled"))
+        ).delete(synchronize_session=False)
+        db_session.commit()
+
+    apagar()
+    yield
+    apagar()
+
+
+def test_the_panel_offers_the_key_field(logged_in) -> None:
+    html = logged_in.get("/dashboard/hedge").text
+
+    assert 'name="jev_api_key"' in html
+    assert 'type="password"' in html
+    assert "/dashboard/hedge/jev" in html
+
+
+def test_saving_a_key_stores_it_encrypted(logged_in, db_session) -> None:
+    logged_in.post(
+        "/dashboard/hedge/jev",
+        data={"jev_enabled": "1", "jev_api_key": CHAVE_JEV},
+        follow_redirects=True,
+    )
+
+    from app.database.repositories.system_setting_repository import SystemSettingRepository
+
+    gravado = SystemSettingRepository(db_session).get("jev_api_key_encrypted")
+
+    assert gravado
+    assert CHAVE_JEV not in gravado
+
+
+def test_the_key_never_comes_back_to_the_screen(logged_in) -> None:
+    """Nem no campo, nem num atributo escondido, nem na confirmacao."""
+    resposta = logged_in.post(
+        "/dashboard/hedge/jev",
+        data={"jev_enabled": "1", "jev_api_key": CHAVE_JEV},
+        follow_redirects=True,
+    )
+
+    assert CHAVE_JEV not in resposta.text
+    assert CHAVE_JEV not in logged_in.get("/dashboard/hedge").text
+
+
+def test_only_the_last_four_are_shown(logged_in) -> None:
+    logged_in.post(
+        "/dashboard/hedge/jev",
+        data={"jev_enabled": "1", "jev_api_key": CHAVE_JEV},
+        follow_redirects=True,
+    )
+
+    html = logged_in.get("/dashboard/hedge").text
+
+    assert CHAVE_JEV[-4:] in html
+    assert CHAVE_JEV[:20] not in html
+
+
+def test_an_empty_field_keeps_the_current_key(logged_in, db_session) -> None:
+    """A regra que impede salvar o liga/desliga de apagar a credencial.
+    E a mesma que vale para a senha do MT5 neste projeto."""
+    from app.database.repositories.system_setting_repository import SystemSettingRepository
+
+    logged_in.post(
+        "/dashboard/hedge/jev",
+        data={"jev_enabled": "1", "jev_api_key": CHAVE_JEV},
+        follow_redirects=True,
+    )
+    antes = SystemSettingRepository(db_session).get("jev_api_key_encrypted")
+
+    # Salva so o toggle, campo da chave vazio.
+    logged_in.post(
+        "/dashboard/hedge/jev",
+        data={"jev_enabled": "", "jev_api_key": ""},
+        follow_redirects=True,
+    )
+    db_session.expire_all()
+    depois = SystemSettingRepository(db_session).get("jev_api_key_encrypted")
+
+    assert depois == antes, "salvar o toggle apagou a chave"
+
+
+def test_removing_the_key_is_an_explicit_action(logged_in, db_session) -> None:
+    from app.database.repositories.system_setting_repository import SystemSettingRepository
+
+    logged_in.post(
+        "/dashboard/hedge/jev",
+        data={"jev_enabled": "1", "jev_api_key": CHAVE_JEV},
+        follow_redirects=True,
+    )
+    logged_in.post("/dashboard/hedge/jev/remove", follow_redirects=True)
+
+    db_session.expire_all()
+    assert not SystemSettingRepository(db_session).get("jev_api_key_encrypted")
+
+
+def test_a_truncated_key_is_refused_with_a_reason(logged_in) -> None:
+    resposta = logged_in.post(
+        "/dashboard/hedge/jev",
+        data={"jev_enabled": "1", "jev_api_key": "curta"},
+        follow_redirects=True,
+    )
+
+    assert "incompleta" in resposta.text
+
+
+def test_the_key_never_reaches_the_audit_log(logged_in, db_session) -> None:
+    logged_in.post(
+        "/dashboard/hedge/jev",
+        data={"jev_enabled": "1", "jev_api_key": CHAVE_JEV},
+        follow_redirects=True,
+    )
+
+    from app.database.models.audit_log import AuditLog
+
+    registros = db_session.query(AuditLog).filter(
+        AuditLog.action == "hedge_jev_config"
+    ).all()
+
+    assert registros
+    for registro in registros:
+        assert CHAVE_JEV not in (registro.detail or "")
+        assert CHAVE_JEV[-4:] in registro.detail
+
+
+def test_enabled_without_a_key_says_which_one_is_missing(logged_in) -> None:
+    """"Desligado" seria uma explicacao errada para quem ligou e nao
+    cadastrou a chave."""
+    logged_in.post(
+        "/dashboard/hedge/jev",
+        data={"jev_enabled": "1", "jev_api_key": ""},
+        follow_redirects=True,
+    )
+
+    html = logged_in.get("/dashboard/hedge").text
+
+    assert "sem chave" in html
+
+
+def test_the_test_button_needs_a_key_first(logged_in) -> None:
+    resposta = logged_in.post("/dashboard/hedge/jev/test", follow_redirects=True)
+
+    assert "Cadastre a chave antes de testar" in resposta.text
+
+
+def test_a_failing_test_reports_without_leaking(logged_in, monkeypatch) -> None:
+    """O teste de conexao faz uma chamada real. Quando ela falha, o
+    operador precisa do motivo — e nada alem dele."""
+    import httpx
+
+    from app.jev import client as modulo
+
+    class _Recusa(modulo.JevClient):
+        def system_one(self, **_kwargs):
+            raise modulo.JevUnavailable(
+                modulo.JevFailure.UNAUTHORIZED, "chave do Jev nao aceita"
+            )
+
+    monkeypatch.setattr("app.api.routes.hedge_dashboard.JevClient", _Recusa)
+    del httpx
+
+    logged_in.post(
+        "/dashboard/hedge/jev",
+        data={"jev_enabled": "1", "jev_api_key": CHAVE_JEV},
+        follow_redirects=True,
+    )
+    resposta = logged_in.post("/dashboard/hedge/jev/test", follow_redirects=True)
+
+    assert "nao aceita" in resposta.text
+    assert CHAVE_JEV not in resposta.text

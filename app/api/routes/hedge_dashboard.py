@@ -33,6 +33,7 @@ from app.api.dependencies.api_token import (
 from app.api.dependencies.auth import get_current_user_for_web
 from app.api.templates_engine import templates
 from app.core.config import get_settings
+from app.core.crypto import MASK
 from app.database.models.user import User
 from app.database.repositories.api_token_repository import ApiTokenRepository
 from app.database.repositories.audit_log_repository import AuditLogRepository
@@ -43,6 +44,14 @@ from app.hedge.engine import Mode, Objective
 from app.hedge.forecast.registry import available_versions, default_engine
 from app.hedge.sessions import evaluate_freshness
 from app.hedge.units import LevelUnit, level_to_price
+from app.jev.api_settings import (
+    clear_api_key,
+    load_jev_settings,
+    save_api_key,
+    set_enabled,
+)
+from app.jev.client import JevClient, JevUnavailable, noul_question
+from app.jev.factory import reset_context_assessor
 from app.jev.hedge_context import BUDGET_SETTING as JEV_BUDGET_SETTING
 from app.news.budget import read_usage
 
@@ -142,8 +151,7 @@ def dashboard_hedge(
             "engine_version": motor.version,
             "engine_kind": str(motor.kind),
             "engines": available_versions(),
-            "jev_enabled": settings.jev_enabled,
-            "jev_configured": bool(settings.jev_api_key),
+            "jev": load_jev_settings(db, settings),
             "jev_model": settings.jev_model,
             "jev_timeout": settings.jev_timeout_seconds,
             "jev_cache_ttl": settings.jev_cache_ttl_seconds,
@@ -564,3 +572,130 @@ Cole-a no campo ApiKey do EA, no proprio terminal. NAO a salve em arquivos
 ESTE CONECTOR NAO ENVIA ORDENS. Ele le cotacao, consulta o painel e
 publica o resultado para o indicador desenhar.
 """
+
+
+# --- chave do Jev -----------------------------------------------------------
+#
+# O desenho original deixava esta chave so no `.env`. O campo existe por
+# pedido do dono do repositorio, e a razao e boa: mexer no `.env` exige SSH
+# na VPS, e quem paga a conta da API nem sempre tem.
+#
+# Ela e a UNICA credencial deste painel que e cifrada no banco
+# (`app/core/crypto.py`), e nao guardada em claro como a da AIsa. O valor
+# em claro nunca volta: a tela mostra mascara, a auditoria guarda so os
+# quatro ultimos caracteres.
+
+
+@router.post("/dashboard/hedge/jev")
+def hedge_jev_save(
+    jev_enabled: str = Form(""),
+    jev_api_key: str = Form(""),
+    user: User = Depends(get_current_user_for_web),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    """Salva o liga/desliga e, se houver, uma chave nova.
+
+    Campo da chave VAZIO significa "mantem a atual", nunca "apaga". Essa
+    e a regra que impede salvar o liga/desliga de apagar a credencial —
+    e e a mesma que vale para a senha do MT5 neste projeto. Apagar exige
+    a acao explicita de remover.
+    """
+    ligado = bool(jev_enabled)
+    set_enabled(db, ligado)
+
+    dica = ""
+    bruta = jev_api_key.strip()
+    if bruta and bruta != MASK:
+        try:
+            dica = save_api_key(db, bruta)
+        except ValueError as exc:
+            return _voltar(erro=str(exc), ancora="#jev")
+
+    AuditLogRepository(db).record(
+        action="hedge_jev_config",
+        entity="jev",
+        # Nunca a chave. Os quatro ultimos identificam qual foi cadastrada
+        # quando ha mais de uma conta, sem revelar o resto.
+        detail=(
+            f"Jev {'ligado' if ligado else 'desligado'}"
+            + (f", chave nova (final {dica})" if dica else "")
+            + f" por {user.username}"
+        ),
+        user_id=user.id,
+    )
+    db.commit()
+    reset_context_assessor()
+
+    mensagem = "Configuracao do Jev salva."
+    if dica:
+        mensagem += f" Chave cadastrada (final {dica})."
+    return _voltar(mensagem, ancora="#jev")
+
+
+@router.post("/dashboard/hedge/jev/remove")
+def hedge_jev_remove(
+    user: User = Depends(get_current_user_for_web),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    """Remove a chave gravada pelo painel.
+
+    Volta a valer o `.env`, se houver — que e o que "removi o que eu
+    tinha posto aqui" significa.
+    """
+    clear_api_key(db)
+    AuditLogRepository(db).record(
+        action="hedge_jev_key_remove",
+        entity="jev",
+        detail=f"chave do Jev removida por {user.username}",
+        user_id=user.id,
+    )
+    db.commit()
+    reset_context_assessor()
+    return _voltar("Chave do Jev removida do painel.", ancora="#jev")
+
+
+@router.post("/dashboard/hedge/jev/test")
+def hedge_jev_test(
+    user: User = Depends(get_current_user_for_web),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    """Uma chamada real, para o operador saber que a chave serve.
+
+    Vale a chamada paga: a alternativa e descobrir que a chave esta
+    errada quando o primeiro evento economico aparecer, horas depois, com
+    o veredito saindo indisponivel sem explicacao.
+
+    Nao consome o orcamento diario, de proposito — e um teste de
+    configuracao, nao uma classificacao. Por isso o cliente e montado
+    aqui em vez de passar pelo `HedgeContextAssessor`.
+    """
+    del user
+    vigente = load_jev_settings(db, get_settings())
+    if not vigente.configured:
+        return _voltar(erro="Cadastre a chave antes de testar.", ancora="#jev")
+
+    settings = get_settings()
+    try:
+        cliente = JevClient(
+            api_key=vigente.api_key or "",
+            base_url=settings.jev_api_base_url,
+            model=settings.jev_model,
+            timeout_seconds=settings.jev_timeout_seconds,
+        )
+        resultado = cliente.system_one(
+            state={"probe": "verificacao de configuracao do painel"},
+            questions={
+                "ok": noul_question("Esta mensagem e uma verificacao de conexao.")
+            },
+        )
+    except JevUnavailable as exc:
+        # `exc.detail` ja e a frase acionavel do cliente, e ela nunca
+        # carrega corpo de resposta nem a chave.
+        return _voltar(erro=f"Jev recusou: {exc.detail or exc.reason.value}", ancora="#jev")
+    except Exception:  # noqa: BLE001
+        return _voltar(erro="Falha inesperada ao falar com o Jev.", ancora="#jev")
+
+    return _voltar(
+        f"Conexao com o Jev OK (modelo {resultado.model or 'nao informado'}).",
+        ancora="#jev",
+    )

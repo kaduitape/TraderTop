@@ -14,6 +14,7 @@ from __future__ import annotations
 import threading
 
 from app.core.config import Settings, get_settings
+from app.jev.api_settings import JevRuntimeSettings
 from app.jev.cache import TTLCache
 from app.jev.client import JevClient, JevUnavailable
 from app.jev.hedge_context import HedgeContextAssessment, HedgeContextAssessor
@@ -86,28 +87,47 @@ _context_assessor: HedgeContextAssessor | None = None
 _context_built_from: tuple | None = None
 
 
-def get_context_assessor(settings: Settings | None = None) -> HedgeContextAssessor | None:
+def get_context_assessor(
+    settings: Settings | None = None,
+    *,
+    runtime: JevRuntimeSettings | None = None,
+) -> HedgeContextAssessor | None:
     """O classificador de contexto do Hedge, ou None quando desligado.
 
     Compartilhado pelo processo, pelo mesmo motivo do avaliador do Pulso:
     um classificador novo a cada requisicao teria cache novo a cada
     requisicao — ou seja, cache nenhum, e uma chamada paga a cada snapshot
     do conector.
+
+    `runtime` traz a configuracao JA resolvida (banco sobrepondo `.env`).
+    Quem a tem passa; quem nao tem cai no `.env`, que e o comportamento de
+    antes de existir o campo no painel.
     """
     global _context_assessor, _context_built_from
 
     resolvidas = settings or get_settings()
-    if not resolvidas.jev_enabled or not resolvidas.jev_api_key:
+    ligado = runtime.enabled if runtime else resolvidas.jev_enabled
+    chave = runtime.api_key if runtime else resolvidas.jev_api_key
+    if not ligado or not chave:
         return None
 
-    assinatura = (*_signature(resolvidas), resolvidas.jev_daily_call_budget)
+    # A impressao digital entra na assinatura — e nao a chave: ela viveria
+    # numa tupla do processo que um `repr` de depuracao imprimiria inteira.
+    # Sem ela, trocar a chave no painel manteria o cliente antigo e o
+    # operador veria 401 com a chave nova ja salva.
+    identidade = runtime.fingerprint() if runtime else ""
+    assinatura = (
+        *_signature(resolvidas),
+        resolvidas.jev_daily_call_budget,
+        identidade,
+    )
     with _lock:
         if _context_assessor is not None and _context_built_from == assinatura:
             return _context_assessor
 
         try:
             cliente = JevClient(
-                api_key=resolvidas.jev_api_key,
+                api_key=chave,
                 base_url=resolvidas.jev_api_base_url,
                 model=resolvidas.jev_model,
                 timeout_seconds=resolvidas.jev_timeout_seconds,
