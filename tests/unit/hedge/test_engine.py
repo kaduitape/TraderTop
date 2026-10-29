@@ -351,3 +351,83 @@ def test_a_short_setup_with_long_style_levels_is_refused() -> None:
 
     assert not r.available
     assert "take abaixo e stop acima" in r.reason
+
+
+# --- lote fixo --------------------------------------------------------------
+
+
+def test_a_fixed_lot_is_used_instead_of_the_derived_one() -> None:
+    """Quando a posicao ja esta aberta, a pergunta deixa de ser "quanto
+    devo operar" e passa a ser "quanto isto cobre"."""
+    r = calculate(
+        desk=_desk(),
+        broker=_broker(),
+        mapping=InstrumentMapping(),
+        fixed_lots=Decimal("3.8"),
+    )
+
+    assert r.available
+    assert r.effective_lots == Decimal("3.8")
+
+
+def test_a_fixed_lot_reports_the_coverage_it_actually_produces() -> None:
+    """Com lote fixo a cobertura e RESULTADO, nao escolha. Fingir que e 1
+    esconderia exposicao direcional de verdade."""
+    r = calculate(
+        desk=_desk(),
+        broker=_broker(),
+        mapping=InstrumentMapping(),
+        fixed_lots=Decimal("3.8"),
+    )
+
+    assert r.coverage_ratio == Decimal("3.8000")
+    assert any("380%" in a and "excede" in a for a in r.warnings)
+
+
+def test_a_fixed_lot_below_full_coverage_says_it_is_uncovered() -> None:
+    r = calculate(
+        desk=_desk(),
+        broker=_broker(),
+        mapping=InstrumentMapping(),
+        fixed_lots=Decimal("0.4"),
+    )
+
+    assert r.residual_exposure > 0
+    assert any("descoberto" in a for a in r.warnings)
+
+
+def test_a_fixed_lot_at_full_coverage_raises_no_alarm() -> None:
+    """Avisar quando esta certo treina a ignorar o aviso."""
+    r = calculate(
+        desk=_desk(),
+        broker=_broker(),
+        mapping=InstrumentMapping(),
+        fixed_lots=Decimal("1.0"),
+    )
+
+    assert not any("cobre" in a for a in r.warnings)
+
+
+def test_a_fixed_lot_the_broker_refuses_is_reported_as_such() -> None:
+    """A mensagem precisa dizer que o problema e o LOTE INFORMADO, nao
+    que a operacao nao da para cobrir."""
+    grosso = _spec("X", step="1", minimum="1")
+
+    r = calculate(
+        desk=_desk(),
+        broker=_broker(spec=grosso),
+        mapping=InstrumentMapping(),
+        fixed_lots=Decimal("0.3"),
+    )
+
+    assert not r.available
+    assert "lote fixo" in r.reason.lower()
+
+
+def test_without_a_fixed_lot_nothing_changes() -> None:
+    sem = calculate(desk=_desk(), broker=_broker(), mapping=InstrumentMapping())
+    nulo = calculate(
+        desk=_desk(), broker=_broker(), mapping=InstrumentMapping(), fixed_lots=None
+    )
+
+    assert sem.effective_lots == nulo.effective_lots == Decimal("1.00")

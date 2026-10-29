@@ -532,6 +532,11 @@ class HedgeService:
                 mapping=mapeamento,
                 coverage=to_decimal(versao.coverage_ratio),
                 current_desk_price=snapshot.mid,
+                fixed_lots=(
+                    to_decimal(versao.broker_fixed_lots)
+                    if versao.broker_fixed_lots is not None
+                    else None
+                ),
             )
         except ConversionError as exc:
             return HedgeCalculation.unavailable(str(exc))

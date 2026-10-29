@@ -232,8 +232,19 @@ def calculate(
     mapping: InstrumentMapping,
     coverage: Decimal = Decimal("1"),
     current_desk_price: Decimal | None = None,
+    fixed_lots: Decimal | None = None,
 ) -> HedgeCalculation:
     """Os tres cenarios, com os dois lados separados.
+
+    `fixed_lots` fixa o lote da corretora em vez de deriva-lo da
+    exposicao. Existe porque o operador frequentemente JA tem a posicao
+    aberta com um tamanho que a mesa ou a corretora impos — e nesse caso
+    a pergunta deixa de ser "quanto devo operar" e passa a ser "quanto
+    isto cobre de fato".
+
+    Com ele, `coverage_ratio` vira RESULTADO e nao entrada: o motor
+    informa a cobertura que aquele lote produz, que raramente e 1. Fingir
+    que e seria o erro — a parte descoberta e exposicao direcional real.
 
     `current_desk_price` alimenta o cenario de encerramento por tempo.
     Sem ele, o cenario de timeout nao e calculado — nao ha preco de
@@ -289,8 +300,13 @@ def calculate(
             "O descolamento entre eles é risco de base, e ele é real."
         )
 
-    pedidos = required_lots(
-        desk=desk, broker_spec=broker.spec, mapping=mapping, coverage=coverage
+    lote_fixo = fixed_lots is not None and fixed_lots > 0
+    pedidos = (
+        fixed_lots
+        if lote_fixo
+        else required_lots(
+            desk=desk, broker_spec=broker.spec, mapping=mapping, coverage=coverage
+        )
     )
     efetivos = round_volume(
         volume=pedidos,
@@ -300,17 +316,27 @@ def calculate(
     )
 
     if efetivos <= 0:
-        return HedgeCalculation.unavailable(
-            f"A cobertura exigiria {pedidos:.4f} lote(s), abaixo do minimo de "
-            f"{broker.spec.volume_min} em {broker.symbol}. Nao da para cobrir "
-            "esta operacao neste instrumento.",
-            warnings=tuple(avisos),
+        motivo = (
+            f"O lote fixo de {pedidos} nao e aceito em {broker.symbol} "
+            f"(minimo {broker.spec.volume_min}, passo {broker.spec.volume_step})."
+            if lote_fixo
+            else (
+                f"A cobertura exigiria {pedidos:.4f} lote(s), abaixo do minimo de "
+                f"{broker.spec.volume_min} em {broker.symbol}. Nao da para cobrir "
+                "esta operacao neste instrumento."
+            )
         )
+        return HedgeCalculation.unavailable(motivo, warnings=tuple(avisos))
 
     if efetivos < pedidos:
         avisos.append(
-            f"Lote arredondado de {pedidos:.4f} para {efetivos} pelo passo de "
-            f"{broker.spec.volume_step}: a cobertura fica incompleta."
+            f"Lote arredondado de {pedidos} para {efetivos} pelo passo de "
+            f"{broker.spec.volume_step}"
+            + (
+                ": a corretora nao aceita o tamanho informado."
+                if lote_fixo
+                else ": a cobertura fica incompleta."
+            )
         )
 
     # A perna da corretora e recriada com o lote efetivo. Calcular com o
@@ -327,6 +353,18 @@ def calculate(
     exposicao_mesa = desk.exposure()
     exposicao_corretora = perna.exposure() * mapping.price_ratio
     residual = exposicao_mesa - exposicao_corretora
+
+    # Com lote fixo a cobertura e RESULTADO, nao escolha — e quase nunca
+    # cai em 1. A diferenca e exposicao direcional de verdade, entao a
+    # tela precisa dizer de que lado ela esta: descoberto (a mesa manda) ou
+    # excedido (a corretora passou a mandar, e o "hedge" virou posicao).
+    if lote_fixo and exposicao_mesa > 0:
+        proporcao = exposicao_corretora / exposicao_mesa
+        if abs(proporcao - 1) > Decimal("0.02"):
+            avisos.append(
+                f"Lote fixo de {efetivos} cobre {proporcao:.0%} da exposicao da "
+                f"mesa — {'sobra descoberto' if proporcao < 1 else 'excede e vira posicao a favor da corretora'}."
+            )
 
     custo_mesa = desk.costs.total(
         volume=desk.contracts, money_per_price_unit=desk.spec.money_per_price_unit

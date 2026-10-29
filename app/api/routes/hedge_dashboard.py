@@ -200,6 +200,7 @@ def hedge_setup_save(
     broker_symbol: str = Form(...),
     coverage_ratio: str = Form("1"),
     price_ratio: str = Form(""),
+    broker_fixed_lots: str = Form(""),
     broker_commission: str = Form("0"),
     broker_slippage: str = Form("0"),
     account_currency: str = Form("USD"),
@@ -298,6 +299,9 @@ def hedge_setup_save(
         "broker_symbol": broker_symbol.strip().upper()[:40],
         "coverage_ratio": _dec(coverage_ratio, default="1"),
         "price_ratio": _dec(price_ratio) if price_ratio.strip() else None,
+        "broker_fixed_lots": (
+            _dec(broker_fixed_lots) if broker_fixed_lots.strip() else None
+        ),
         "broker_commission": _dec(broker_commission),
         "broker_slippage": _dec(broker_slippage),
         "account_currency": account_currency.strip().upper()[:8] or "USD",

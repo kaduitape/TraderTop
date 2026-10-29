@@ -115,6 +115,15 @@ class HedgeSetupVersion(Base, TimestampMixin):
     coverage_ratio: Mapped[Decimal] = mapped_column(
         Numeric(10, 4), nullable=False, default=1
     )
+    broker_fixed_lots: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 8), nullable=True
+    )
+    """Lote fixo na corretora. NULL = derivar da exposicao.
+
+    Existe porque o operador frequentemente JA tem a posicao aberta com um
+    tamanho que alguem impos. Nesse caso `coverage_ratio` vira resultado,
+    nao entrada — e o motor informa quanto aquele lote cobre de fato."""
+
     price_ratio: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
     """Quantas unidades de preco da corretora por 1 da mesa. NULL exige
     que os simbolos sejam equivalentes — ver `contracts.mapping_for`."""

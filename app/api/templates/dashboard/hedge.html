@@ -383,6 +383,18 @@
                                            value="{{ v.account_currency if v else 'USD' }}">
                                 </div>
                                 <div class="col-12">
+                                    <label class="form-label small" for="f-lots">Lote fixo na corretora</label>
+                                    <input class="form-control form-control-sm" id="f-lots" name="broker_fixed_lots"
+                                           placeholder="vazio = calcular pela exposição"
+                                           value="{{ v.broker_fixed_lots if v and v.broker_fixed_lots is not none }}">
+                                    <div class="form-text mt-0">
+                                        Preencha quando a posição <strong>já está aberta</strong> com um
+                                        tamanho definido. Aí a proporção acima é ignorada e o painel passa
+                                        a informar <em>quanto aquele lote cobre de fato</em> — que
+                                        raramente é 100%, e a diferença é exposição direcional real.
+                                    </div>
+                                </div>
+                                <div class="col-12">
                                     <div class="form-text mt-0">
                                         Razão de preço só é obrigatória quando os instrumentos são
                                         diferentes — o sistema não assume que futuro e CFD andam igual.
