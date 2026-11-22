@@ -148,6 +148,7 @@ BUILTINS = {
     # eventos e io
     "EventSetTimer", "EventKillTimer", "EventSetMillisecondTimer",
     "WebRequest", "Print", "PrintFormat", "Alert", "Comment", "SendNotification",
+    "PlaySound",
     "ResetLastError", "GetLastError", "Sleep", "ExpertRemove",
     "FileOpen", "FileClose", "FileWrite", "FileWriteString", "FileRead",
     "FileReadString", "FileDelete", "FileIsExist", "FolderCreate",

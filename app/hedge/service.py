@@ -128,6 +128,14 @@ class AnalysisOut:
     entry: Decimal = Decimal("0")
     take: Decimal = Decimal("0")
     stop: Decimal = Decimal("0")
+    desk_tick_size: Decimal = Decimal("0")
+    """Tick da MESA, nao do grafico onde o indicador esta.
+
+    Vai na resposta porque a distancia ate a barreira so e legivel em
+    ticks, e o indicador nao tem como saber o tick da mesa: ele roda num
+    grafico da CORRETORA, cujo tick pode ser outro. Convertido com o tick
+    errado, "faltam 12 ticks" viraria um numero plausivel e falso."""
+
     current_price: Decimal = Decimal("0")
     bid: Decimal = Decimal("0")
     ask: Decimal = Decimal("0")
@@ -310,6 +318,7 @@ class HedgeService:
             "entry": to_decimal(versao.desk_entry),
             "take": to_decimal(versao.desk_take),
             "stop": to_decimal(versao.desk_stop),
+            "desk_tick_size": to_decimal(versao.desk_tick_size, field="desk_tick_size"),
             "current_price": snapshot.mid,
             "bid": snapshot.bid,
             "ask": snapshot.ask,

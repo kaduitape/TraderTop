@@ -55,7 +55,12 @@
 #property strict
 
 #define TTH_PREFIX        "TTH_"
-#define TTH_CHANNEL_VER   1
+
+//--- Versao 2: acrescentou cobertura, exposicao das duas pernas e o tick
+//--- da mesa. A checagem de versao em `TTH_ReadFrame` e o que impede um
+//--- EA v1 de alimentar um indicador v2 com campos ausentes lidos como
+//--- zero — "cobertura 0%" seria uma afirmacao, nao uma falta de dado.
+#define TTH_CHANNEL_VER   2
 
 //--- Estados. Espelham `SessionState` no servidor; o indicador so ve
 //--- numero e traduz com a tabela abaixo.
@@ -163,6 +168,12 @@ struct TTHFrame
    double            has_financial;
    double            basis_risk;
    double            setup_version;
+
+   //--- v2
+   double            coverage;        // 1.0 = exposicao igual nas duas pernas
+   double            desk_exposure;   // dinheiro por unidade de preco, mesa
+   double            broker_exposure; // idem, corretora
+   double            desk_tick_size;  // tick da MESA, nao o do grafico
   };
 
 void TTH_WriteFrame(const string tag, const TTHFrame &f)
@@ -194,6 +205,10 @@ void TTH_WriteFrame(const string tag, const TTHFrame &f)
    TTH_Set(tag, "has_financial",  f.has_financial);
    TTH_Set(tag, "basis_risk",     f.basis_risk);
    TTH_Set(tag, "setup_version",  f.setup_version);
+   TTH_Set(tag, "coverage",        f.coverage);
+   TTH_Set(tag, "desk_exposure",   f.desk_exposure);
+   TTH_Set(tag, "broker_exposure", f.broker_exposure);
+   TTH_Set(tag, "desk_tick_size",  f.desk_tick_size);
    TTH_Set(tag, "channel_ver",    (double)TTH_CHANNEL_VER);
 
    TTH_Set(tag, "seq_end", f.seq);
@@ -237,6 +252,13 @@ bool TTH_ReadFrame(const string tag, TTHFrame &f)
    f.has_financial = TTH_Get(tag, "has_financial", 0);
    f.basis_risk    = TTH_Get(tag, "basis_risk",    0);
    f.setup_version = TTH_Get(tag, "setup_version", 0);
+
+   // -1 em vez de 0: "nao informado" tem de ser distinguivel de "cobertura
+   // zero", que seria a perna da corretora inteira descoberta.
+   f.coverage        = TTH_Get(tag, "coverage",        -1);
+   f.desk_exposure   = TTH_Get(tag, "desk_exposure",   0);
+   f.broker_exposure = TTH_Get(tag, "broker_exposure", 0);
+   f.desk_tick_size  = TTH_Get(tag, "desk_tick_size",  0);
 
    double inicio = TTH_Get(tag, "seq_begin", -1);
    if(inicio != fim)

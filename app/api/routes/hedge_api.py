@@ -217,6 +217,10 @@ def analysis_payload(saida: AnalysisOut) -> dict:
             "take": str(saida.take),
             "stop": str(saida.stop),
             "unit": "PRICE",
+            # O tick da MESA. Campo acrescentado sem subir `schema_version`
+            # de proposito: o conector antigo rejeita schema diferente e
+            # pararia de funcionar, enquanto uma chave extra ele ignora.
+            "desk_tick_size": str(saida.desk_tick_size),
         },
         "price": {
             "current": str(saida.current_price),

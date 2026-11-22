@@ -321,6 +321,39 @@ def test_a_snapshot_returns_a_complete_analysis(client, db_session) -> None:
     assert set(dados["financial"]["scenarios"]) == {"DESK_TAKE", "DESK_STOP", "TIMEOUT"}
 
 
+def test_the_response_carries_the_desk_tick_not_the_charts(client, db_session) -> None:
+    """A distancia ate a barreira so e legivel em ticks, e o indicador roda
+    num grafico da CORRETORA — cujo tick pode ser outro. Sem este campo ele
+    converteria com o tick errado e exibiria um numero plausivel e falso."""
+    user = _usuario(db_session, "hedge_tick")
+    db_session.commit()
+    setup = _setup(db_session, user.id, desk_tick_size=Decimal("0.25"))
+    chave = _chave(db_session, user.id)
+
+    dados = client.post(
+        "/api/v1/hedge/snapshot", json=_corpo(setup.id), headers=_cabecalho(chave)
+    ).json()
+
+    assert Decimal(dados["levels"]["desk_tick_size"]) == Decimal("0.25")
+
+
+def test_the_desk_tick_arrives_without_bumping_the_schema(client, db_session) -> None:
+    """Subir `schema_version` por um campo novo quebraria todo conector ja
+    instalado: ele compara por igualdade e devolveria 409. Chave extra o
+    conector antigo ignora, e e por isso que o numero nao sobe aqui."""
+    user = _usuario(db_session, "hedge_tick_schema")
+    db_session.commit()
+    setup = _setup(db_session, user.id)
+    chave = _chave(db_session, user.id)
+
+    dados = client.post(
+        "/api/v1/hedge/snapshot", json=_corpo(setup.id), headers=_cabecalho(chave)
+    ).json()
+
+    assert dados["schema_version"] == 1
+    assert "desk_tick_size" in dados["levels"]
+
+
 def test_an_out_of_order_snapshot_is_discarded(client, db_session) -> None:
     user = _usuario(db_session, "hedge_ordem")
     db_session.commit()
@@ -715,6 +748,99 @@ def test_the_mql5_sources_send_no_orders() -> None:
             "OrderClose",
         ):
             assert proibido not in fonte, f"{nome}: {proibido}"
+
+
+def _fonte_mql5(nome: str) -> str:
+    """O arquivo sem comentarios. Uma palavra proibida dentro de um
+    comentario explicando por que ela nao esta la reprovaria o teste."""
+    import pathlib
+    import re
+
+    bruto = (pathlib.Path("scripts/mql5") / nome).read_text()
+    sem_bloco = re.sub(r"/\*.*?\*/", "", bruto, flags=re.DOTALL)
+    return re.sub(r"//[^\n]*", "", sem_bloco)
+
+
+def _corpo_da_funcao(fonte: str, assinatura: str) -> str:
+    """O corpo de uma funcao, por contagem de chaves."""
+    inicio = fonte.index(assinatura)
+    abre = fonte.index("{", inicio)
+    nivel = 0
+    for pos in range(abre, len(fonte)):
+        if fonte[pos] == "{":
+            nivel += 1
+        elif fonte[pos] == "}":
+            nivel -= 1
+            if nivel == 0:
+                return fonte[abre : pos + 1]
+    raise AssertionError(f"chaves desbalanceadas em {assinatura}")
+
+
+def test_every_exit_from_the_indicator_update_repaints() -> None:
+    """O terminal NAO repinta o grafico por criar objeto: repinta quando
+    chega tick. Num ativo parado ou com o mercado fechado, um caminho de
+    `Atualizar` sem `ChartRedraw` deixa o painel inteiro invisivel — os
+    objetos existem e ninguem os desenha. Era a causa de "nao aparece
+    nada", e nenhum teste de Python a alcanca: a garantia possivel e
+    estrutural."""
+    corpo = _corpo_da_funcao(
+        _fonte_mql5("TraderTopHedgeIndicator.mq5"), "void Atualizar()"
+    )
+
+    saidas = corpo.count("return")
+    repinturas = corpo.count("ChartRedraw()")
+    assert repinturas >= saidas + 1, (
+        f"Atualizar tem {saidas} saidas e {repinturas} ChartRedraw: "
+        "algum caminho termina sem repintar"
+    )
+
+
+def test_the_panel_sets_an_anchor_on_every_label() -> None:
+    """Nos cantos da direita o X e contado da borda direita para dentro.
+    Sem `OBJPROP_ANCHOR`, um rotulo fica ancorado pela esquerda e cresce
+    para FORA da tela — `PanelCorner=1` desenhava um painel invisivel."""
+    fonte = _fonte_mql5("TraderTopHedgeIndicator.mq5")
+    corpo = _corpo_da_funcao(fonte, "void Texto(")
+
+    assert "OBJPROP_ANCHOR" in corpo
+    assert "ANCHOR_RIGHT_UPPER" in corpo and "ANCHOR_LEFT_UPPER" in corpo
+    # Todo texto do painel passa por `Texto`: um `ObjectCreate(..OBJ_LABEL..)`
+    # em outro lugar escaparia da correcao de ancora.
+    assert fonte.count("OBJ_LABEL") == 1
+
+
+def test_every_channel_field_is_both_written_and_read() -> None:
+    """Campo acrescentado a `TTHFrame` e esquecido em `TTH_WriteFrame`
+    nao da erro: o leitor devolve o fallback para sempre. "cobertura 0%"
+    e uma afirmacao sobre a operacao, nao a ausencia de um dado."""
+    import pathlib
+    import re
+
+    fonte = pathlib.Path(
+        "scripts/mql5/Include/TraderTop/HedgeChannel.mqh"
+    ).read_text()
+
+    estrutura = _corpo_da_funcao(fonte, "struct TTHFrame")
+    campos = set(re.findall(r"double\s+(\w+);", estrutura))
+    assert len(campos) > 20, "a estrutura do canal nao foi lida corretamente"
+
+    escrita = _corpo_da_funcao(fonte, "void TTH_WriteFrame(")
+    leitura = _corpo_da_funcao(fonte, "bool TTH_ReadFrame(")
+
+    for campo in sorted(campos):
+        if campo == "seq":
+            continue   # viaja como o par seq_begin/seq_end
+        assert f'"{campo}"' in escrita, f"{campo} nunca e escrito no canal"
+        assert f'"{campo}"' in leitura, f"{campo} nunca e lido do canal"
+
+
+def test_the_connector_fills_every_v2_field() -> None:
+    """A versao do canal subiu para 2 porque campos novos apareceram. Um
+    conector que declara v2 e nao preenche os campos novos e pior que um
+    v1: a checagem de versao o aprova e o indicador desenha zeros."""
+    fonte = _fonte_mql5("TraderTopHedgeConnector.mq5")
+    for campo in ("coverage", "desk_exposure", "broker_exposure", "desk_tick_size"):
+        assert f"f.{campo}" in fonte, f"o conector nao preenche {campo}"
 
 
 # --- JEV: contexto em modo observacao --------------------------------------

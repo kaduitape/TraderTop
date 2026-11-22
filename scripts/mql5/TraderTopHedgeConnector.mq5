@@ -42,7 +42,7 @@
 //|    sempre -1. Use conta demo real.                                 |
 //+------------------------------------------------------------------+
 #property copyright "AI Trader PRO"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
 #property description "Conector de dados do Hedge AI. Le cotacao, consulta o painel e publica para o indicador. NAO envia ordens."
 
@@ -65,7 +65,7 @@ input int    MaxBackoffSeconds = 120;      // Teto da espera apos falhas
 input int    AtrPeriod        = 14;        // Periodo do ATR
 input ENUM_TIMEFRAMES AtrTimeframe = PERIOD_M15;  // Timeframe do ATR
 
-#define CONNECTOR_VERSION "1.0.0"
+#define CONNECTOR_VERSION "1.1.0"
 #define SCHEMA_VERSION    1
 
 //--- Estado
@@ -338,6 +338,11 @@ void Publicar(const string json)
    f.entry   = JsonNumAt(json, "entry", niveis);
    f.take    = JsonNumAt(json, "take", niveis);
    f.stop    = JsonNumAt(json, "stop", niveis);
+   // Ausente num servidor mais antigo: fica 0 e o indicador cai no tick do
+   // proprio grafico. Nao e exato, mas o grafico e do mesmo ativo na
+   // esmagadora maioria dos casos, e a alternativa seria esconder a
+   // distancia justamente quando ela e o numero mais util da tela.
+   f.desk_tick_size = JsonNumAt(json, "desk_tick_size", niveis);
 
    int precos = JsonObjectStart(json, "price", 0);
    f.price = JsonNumAt(json, "current", precos);
@@ -375,6 +380,11 @@ void Publicar(const string json)
      {
       f.lots     = JsonNumAt(json, "effective_lots", fin);
       f.residual = JsonNumAt(json, "residual_exposure", fin);
+      // Com lote fixo a cobertura e RESULTADO, nao configuracao: e o que
+      // aquele lote cobre de fato, e raramente cai em 1.
+      f.coverage        = JsonNumAt(json, "coverage_ratio", fin, -1);
+      f.desk_exposure   = JsonNumAt(json, "desk_exposure", fin);
+      f.broker_exposure = JsonNumAt(json, "broker_exposure", fin);
       int cenarios = JsonObjectStart(json, "scenarios", fin);
       f.net_take    = JsonScenarioNum(json, "DESK_TAKE", "net", cenarios);
       f.net_stop    = JsonScenarioNum(json, "DESK_STOP", "net", cenarios);
@@ -384,6 +394,7 @@ void Publicar(const string json)
      {
       f.lots = 0; f.residual = 0;
       f.net_take = 0; f.net_stop = 0; f.net_timeout = 0;
+      f.coverage = -1; f.desk_exposure = 0; f.broker_exposure = 0;
      }
 
    f.updated_at = (double)TimeCurrent();

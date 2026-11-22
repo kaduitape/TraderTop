@@ -55,6 +55,13 @@ o quadro anterior permanece.
 sessões — o caso normal, já que o conector costuma ficar num gráfico
 separado para não disputar o gráfico principal com outro EA.
 
+**Versão do canal.** `TTH_CHANNEL_VER` é comparada por igualdade na
+leitura: um EA de uma versão não alimenta um indicador de outra. A v2
+acrescentou `coverage`, `desk_exposure`, `broker_exposure` e
+`desk_tick_size`. Sem a checagem, o indicador novo leria o fallback dos
+campos ausentes e exibiria "cobertura 0%" — uma afirmação sobre a
+operação, não a falta de um dado. **Recompile os dois juntos.**
+
 ---
 
 ## Motor financeiro
@@ -391,8 +398,58 @@ canal.
 ## Indicador
 
 Desenha entrada, take e stop da mesa, as regiões entre o preço e cada
-barreira, os percentuais em corpo grande, o prazo restante, a última
-atualização e o estado.
+barreira, e um painel cuja primeira linha é um **veredito**.
+
+### O veredito
+
+A pergunta no meio do pregão não é "quais são os números", é "o que está
+acontecendo agora". A linha grande responde isso e só isso: **qual
+barreira está mais perto, a quantos ticks, e quanto custa se ela for
+tocada**. O resto do painel sustenta o veredito; não precisa ser lido
+para agir.
+
+Ele **descreve, nunca recomenda**. Não existe ali "feche", "aumente" ou
+"saia" — a decisão é de quem tem o dinheiro na mesa, e um indicador que a
+tomasse estaria operando sem assumir o risco.
+
+Precedência deliberada: um problema de **dado** vence qualquer número.
+`CHAVE RECUSADA`, `SEM PAINEL`, `DADOS VELHOS` e `SEM CONECTOR` aparecem
+no lugar do veredito, porque anunciar "stop a 12 ticks" sobre um quadro
+de quarenta minutos atrás seria a pior tela possível: urgente, precisa e
+falsa.
+
+### Distância em ticks
+
+O tick usado é o da **mesa**, que vem do servidor em
+`levels.desk_tick_size` — não o do gráfico onde o indicador está. O
+indicador costuma rodar num gráfico da corretora, cujo tick pode ser
+outro; convertido com o tick errado, "faltam 12 ticks" vira um número
+plausível e falso. Sem o campo (servidor antigo), ele cai no tick do
+gráfico.
+
+### Cobertura
+
+Vem de `financial.coverage_ratio`. Com **lote fixo** ela é *resultado*, e
+raramente cai em 1 — por isso o painel diz de que **lado** está a
+diferença, que são erros opostos: abaixo de 100% sobra descoberto e a
+mesa manda no resultado; acima, o "hedge" virou posição a favor da
+corretora. A faixa neutra é de 2%, porque avisar quando está certo treina
+a ignorar o aviso.
+
+### Aviso de aproximação
+
+`AlertTicks` (0 = desligado) dispara `Alert()` **uma vez por entrada na
+faixa**. Sair da faixa rearma. Repetir a cada segundo treinaria o
+operador a ignorar, que é o mesmo que não ter.
+
+### Redesenho
+
+Toda alteração de objeto termina em `ChartRedraw()`. O terminal **não**
+repinta o gráfico por criar objeto — repinta quando chega tick. Num ativo
+parado ou com o mercado fechado, um caminho sem `ChartRedraw` deixa o
+painel inteiro invisível: os objetos existem e ninguém os desenha. Era a
+causa de *"não aparece nada"*, e `test_every_exit_from_the_indicator_update_repaints`
+trava o contrato, porque nenhum teste de Python alcança o terminal.
 
 **Cores e objetivo.** No modo *favorecer corretora* a região do **stop**
 fica verde e a do **take** vermelha, porque é o stop que se quer. No modo
@@ -407,6 +464,20 @@ fixo. Numa venda o take fica abaixo da entrada.
 fundo do gráfico (`ZoneOpacity`), porque o MQL5 não tem alfa por objeto.
 Canvas daria alfa real ao custo de reimplementar a escala de preços — e
 duas escalas divergem.
+
+**Intensidade pela distância.** A opacidade de cada região é interpolada
+entre `ZoneOpacity` (barreira colada) e 100, invisível (barreira no
+extremo oposto). Com opacidade fixa, a região do alvo distante cobria a
+tela inteira de verde enquanto o stop estava a 32 ticks: a cor mais
+visível do gráfico dizia o contrário do que estava acontecendo.
+
+**Painel em qualquer canto.** O painel é montado em pixels
+(`OBJ_RECTANGLE_LABEL` + `OBJ_LABEL`) para não se mexer quando o gráfico
+rola. Nos cantos da **direita** o MetaTrader conta X da borda direita
+para dentro, e nos de **baixo** conta Y de baixo para cima — sem essa
+conversão, e sem `OBJPROP_ANCHOR`, escolher `PanelCorner=1` desenhava o
+painel inteiro para fora da tela. Era a segunda causa de "não aparece
+nada".
 
 **Objetos** levam prefixo próprio por sessão, são **atualizados** e não
 recriados a cada tick, e ao remover o indicador só os dele são apagados.
