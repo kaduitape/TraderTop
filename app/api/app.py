@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -23,8 +25,27 @@ from app.api.routes import (
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.maintenance.scheduler import RetentionScheduler
 
 _STATIC_DIR = Path(__file__).parent / "static"
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Sobe e desce a manutencao periodica junto com a API.
+
+    A retencao mora aqui porque na VPS este e o unico processo residente:
+    `mt5-worker` esta atras do profile `local-mt5` e nao sobe la, e nao ha
+    cron no arranjo. `RetentionScheduler.start` decide sozinho se deve
+    mesmo iniciar — na suite, por exemplo, nao inicia.
+    """
+    agendador = RetentionScheduler()
+    agendador.start()
+    app.state.retention = agendador
+    try:
+        yield
+    finally:
+        agendador.stop()
 
 
 def create_app() -> FastAPI:
@@ -37,6 +58,7 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version="0.1.0",
         debug=settings.app_debug,
+        lifespan=_lifespan,
     )
 
     @app.exception_handler(RedirectToLogin)

@@ -2,7 +2,8 @@
 
 Comandos somente-leitura em relacao ao MetaTrader: `mt5 check`, `mt5
 symbols`, `collect candles`, `collect ticks` (incrementais e com
-checagem de qualidade), `quality check`, `data purge-ticks` (retencao),
+checagem de qualidade), `quality check`, `data retention` (aplica a
+politica de retencao na hora), `data purge-ticks`,
 `features build` (indicadores/features/regime), `backtest run` (backtest
 por candle de uma estrategia), `backtest compare` (relatorio comparativo
 entre todas as estrategias registradas), `backtest run-ticks` (backtest
@@ -582,6 +583,84 @@ def cmd_data_purge_ticks(args: argparse.Namespace) -> int:
         session.close()
 
     print(f"ticks removidos (mais antigos que {retention_days} dia(s)): {deleted}")
+    return 0
+
+
+def cmd_data_retention(args: argparse.Namespace) -> int:
+    """Aplica a politica de retencao inteira, agora.
+
+    A mesma que a thread de manutencao executa — este comando existe para a
+    PRIMEIRA limpeza, contra um acumulo que levou meses para se formar, e
+    para quem quer decidir a hora em vez de esperar a madrugada.
+    """
+    from app.database.repositories.data_quality_repository import DataQualityEventRepository
+    from app.maintenance.retention import (
+        RetentionPolicy,
+        apply_retention,
+        optimize_tables,
+    )
+
+    settings = get_settings()
+    policy = RetentionPolicy.from_settings(settings)
+    if args.chunk_size is not None:
+        policy = dataclasses.replace(policy, chunk_size=args.chunk_size)
+    if args.max_chunks is not None:
+        policy = dataclasses.replace(policy, max_chunks_per_run=args.max_chunks)
+
+    problemas = policy.validate()
+    if problemas:
+        for problema in problemas:
+            print(f"configuracao invalida: {problema}")
+        return 1
+
+    print(
+        f"politica: ticks {policy.tick_days}d | qualidade {policy.quality_days}d "
+        f"(CRITICAL {policy.quality_critical_days}d) | lotes de {policy.chunk_size}, "
+        f"teto {policy.max_chunks_per_run}"
+    )
+
+    session = get_session_factory()()
+    try:
+        antes = TickRepository(session).summary()
+        ticks_antes = sum(linha[1] for linha in antes)
+        qualidade_antes = DataQualityEventRepository(session).count_by_severity()
+        print(
+            f"antes: {ticks_antes} tick(s) | eventos de qualidade "
+            f"{sum(qualidade_antes.values())} {dict(sorted(qualidade_antes.items()))}"
+        )
+
+        if args.dry_run:
+            # Nao ha "contagem do que seria apagado" barata numa tabela de
+            # milhoes de linhas: um COUNT com o mesmo WHERE varre o mesmo
+            # indice e custa quase o que a purga custaria. O util aqui e
+            # mostrar o corte e deixar a pessoa decidir.
+            agora = datetime.now(UTC)
+            print(f"[dry-run] corte de ticks: {agora - timedelta(days=policy.tick_days)}")
+            print(
+                f"[dry-run] corte de qualidade: "
+                f"{agora - timedelta(days=policy.quality_days)} "
+                f"(CRITICAL {agora - timedelta(days=policy.quality_critical_days)})"
+            )
+            return 0
+
+        resultado = apply_retention(session, policy, now=datetime.now(UTC))
+        print(resultado.describe())
+
+        if args.optimize:
+            # Depois da purga, nunca antes: reconstruir a tabela com as
+            # linhas velhas ainda dentro copiaria justamente o que ia sair.
+            print(
+                "OPTIMIZE TABLE: reconstroi as tabelas e BLOQUEIA ESCRITA enquanto "
+                "roda. Em tabela de gigabytes sao minutos com a coleta parada."
+            )
+            for tabela, estado in optimize_tables(session).items():
+                print(f"  {tabela}: {estado}")
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
     return 0
 
 
@@ -2743,6 +2822,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--older-than-days", type=int, default=None, help="Sobrescreve TICK_RETENTION_DAYS"
     )
 
+    retention_parser = data_subparsers.add_parser(
+        "retention",
+        help="Aplica a politica de retencao inteira (ticks + eventos de qualidade)",
+    )
+    retention_parser.add_argument(
+        "--dry-run", action="store_true", help="So mostra os cortes, nao apaga"
+    )
+    retention_parser.add_argument(
+        "--chunk-size", type=int, default=None, help="Sobrescreve RETENTION_CHUNK_SIZE"
+    )
+    retention_parser.add_argument(
+        "--max-chunks",
+        type=int,
+        default=None,
+        help="Sobrescreve RETENTION_MAX_CHUNKS_PER_RUN (use alto na primeira limpeza)",
+    )
+    retention_parser.add_argument(
+        "--optimize",
+        action="store_true",
+        help="OPTIMIZE TABLE depois da purga: devolve o espaco ao disco, bloqueia escrita",
+    )
+
     features_parser = subparsers.add_parser(
         "features", help="Indicadores, features e regime de mercado"
     )
@@ -3402,6 +3503,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "data" and args.data_command == "purge-ticks":
         return cmd_data_purge_ticks(args)
+
+    if args.command == "data" and args.data_command == "retention":
+        return cmd_data_retention(args)
 
     if args.command == "features" and args.features_command == "build":
         return cmd_features_build(args)

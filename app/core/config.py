@@ -103,7 +103,44 @@ class Settings(BaseSettings):
     quality_max_spread_points: float = 50.0
     quality_max_feed_delay_seconds: int = 300
     quality_min_score: int = 70
-    tick_retention_days: int = 30
+
+    tick_retention_days: int = 7
+    """Dias de ticks mantidos. Reduzido de 30 para 7 quando a retencao
+    passou a ser automatica (Fase 20).
+
+    O que isso NAO afeta: a analise ao vivo le no maximo 1 hora de ticks
+    (`tick_window_seconds`, limitado a 3600), a FotoAnalise le 1 tick, e o
+    backtest por CANDLE nao usa ticks — candles sao mantidas
+    indefinidamente.
+
+    O que afeta: o backtest por TICK (`backtest run --tick`) so alcanca
+    esta janela. Suba o valor se precisar testar mais fundo; o custo e
+    linear em disco, e ticks sao de longe a maior tabela do sistema."""
+
+    # --- Retencao automatica (Fase 20) ----------------------------------------
+    quality_event_retention_days: int = 14
+    """`data_quality_events` de severidade INFO/WARNING, e qualquer
+    severidade futura nao reconhecida. Nenhum codigo le esta tabela: ela e
+    trilha forense para "por que o feed estava ruim no dia X", e duas
+    semanas cobrem esse uso."""
+
+    quality_event_critical_retention_days: int = 90
+    """CRITICAL vive mais: e justamente o que se procura depois de um
+    incidente, e o volume dele e pequeno comparado ao resto."""
+
+    retention_enabled: bool = True
+    retention_interval_hours: int = 24
+
+    retention_chunk_size: int = 5_000
+    """Linhas por lote. DELETE unico de milhoes de linhas no InnoDB segura
+    uma transacao gigante: o undo log cresce, a tabela trava para quem
+    escreve, e um timeout desfaz tudo — a proxima tentativa encara a mesma
+    montanha. Em lotes, o trabalho ja feito fica feito."""
+
+    retention_max_chunks_per_run: int = 400
+    """Teto de lotes por execucao (400 x 5000 = 2 milhoes de linhas). A
+    primeira execucao contra um acumulo de meses nao pode rodar por horas
+    disputando IO com a coleta; ela limpa o teto e a proxima continua."""
 
     # --- Machine learning (Fase 8) ---------------------------------------------
     ml_datasets_dir: str = "datasets"

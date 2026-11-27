@@ -62,7 +62,12 @@ FORA_DO_CONTAINER = {
     "AUTH_JWT_ALGORITHM",
     "AUTH_ACCESS_TOKEN_EXPIRE_MINUTES",
     "QUALITY_MIN_SCORE",
-    "TICK_RETENTION_DAYS",
+    # TICK_RETENTION_DAYS saiu daqui na Fase 20: a retencao deixou de ser um
+    # comando que alguem roda e virou thread dentro do container da API.
+    # Mantida nesta lista, a janela de retencao em producao ficaria presa no
+    # default do codigo, sem ninguem conseguir mudar pelo `.env` -- que e
+    # exatamente o tipo de falha silenciosa que este arquivo existe para
+    # impedir.
 }
 
 

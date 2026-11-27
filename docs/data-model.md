@@ -100,10 +100,9 @@ critérios de aceite verificáveis por fase.
   duas tabelas sem uma necessidade concreta (ex.: histórico de mudança de
   especificação ao longo do tempo), reavaliável quando essa necessidade
   aparecer.
-- Retenção de ticks: `TICK_RETENTION_DAYS` (padrão 30), aplicada via
-  `TickRepository.purge_older_than` / `python -m app.cli data purge-ticks`.
-  Candles **não** são expurgadas (volume bem menor e são a base do
-  backtesting por candle, Fase 5).
+- Retenção: **automática** desde a Fase 20 — ver seção 3.1. Candles **não**
+  são expurgadas (volume bem menor e são a base do backtesting por candle,
+  Fase 5).
 - Qualidade de dados: `app/market/data_quality.py` detecta timestamps
   duplicados, buracos, OHLC inconsistente, preço/volume inválido, ticks
   fora de ordem, spread absurdo, atraso do feed e timestamp no futuro
@@ -111,6 +110,56 @@ critérios de aceite verificáveis por fase.
   `data_quality_events`; a nota agregada (`compute_score`) nunca substitui
   as ocorrências individuais. Divergência entre candles e ticks fica fora
   do escopo por ora (ver docstring do módulo).
+
+## 3.1 Retenção automática (Fase 20)
+
+Duas tabelas cresciam sem teto. `ticks` tinha purga, mas só manual
+(`data purge-ticks`); `data_quality_events` não tinha nenhuma. Política que
+depende de alguém lembrar não é política.
+
+| Tabela | Janela | Observação |
+|---|---|---|
+| `ticks` | `TICK_RETENTION_DAYS` = **7** | Era 30. É de longe a maior tabela. |
+| `data_quality_events` (INFO/WARNING e severidades desconhecidas) | `QUALITY_EVENT_RETENTION_DAYS` = **14** | |
+| `data_quality_events` (CRITICAL) | `QUALITY_EVENT_CRITICAL_RETENTION_DAYS` = **90** | É o que se procura depois de um incidente. |
+| `candles`, `audit_log`, trades, setups | — | Mantidas indefinidamente, de propósito. |
+
+**O que a janela de ticks não afeta.** A análise ao vivo lê no máximo 1
+hora de ticks (`tick_window_seconds`, limitado a 3600 no painel), a
+FotoAnálise lê 1 tick, e o backtest por candle não usa ticks. O que a
+janela limita é o **backtest por tick**, que precisa da sequência real para
+simular fills. Subir o valor é uma variável de ambiente; o custo é linear
+em disco.
+
+**Por que não afinar em vez de apagar.** Guardar 1 tick por segundo depois
+de N dias foi rejeitado: o backtest por tick existe justamente para simular
+preenchimento contra a sequência real, e rodado sobre ticks afinados ele
+continua produzindo número — otimista, sem avisar. Backtest ausente é
+problema visível; backtest que mente não é.
+
+**Onde roda.** Thread de manutenção no lifespan da API
+(`app/maintenance/scheduler.py`). Na VPS sobem apenas `db` e `app`:
+`mt5-worker` está atrás do profile `local-mt5` e não sobe lá, e não há cron
+no arranjo. O horário da última execução fica em `system_settings`
+(`retention_last_run_utc`), então um container que reinicia não dispara uma
+purga por reinício. `RETENTION_ENABLED=false` desliga; `APP_ENV=test`
+desliga sozinho, porque uma thread apagando linhas em paralelo com a suíte
+produziria falha intermitente.
+
+**Em lotes, com commit por lote.** Um `DELETE` único de milhões de linhas no
+InnoDB segura uma transação gigante: o undo log cresce, a tabela de ticks
+trava para a coleta que tenta escrever nela, e um timeout desfaz tudo — a
+execução seguinte encara a mesma montanha e falha igual.
+`RETENTION_MAX_CHUNKS_PER_RUN` limita o trabalho por execução (padrão 2
+milhões de linhas); o resto fica para a próxima.
+
+**`DELETE` não devolve espaço ao disco.** O InnoDB libera páginas para reuso
+dentro do mesmo `.ibd` — depois da primeira purga grande, `df` não se mexe.
+Para encolher o arquivo é preciso `OPTIMIZE TABLE`
+(`data retention --optimize`), que **reconstrói a tabela e bloqueia
+escrita** enquanto roda. Faz sentido uma vez, com o mercado fechado; não
+toda madrugada. Em regime, as páginas liberadas são reaproveitadas e o
+arquivo para de crescer.
 
 ## 4. Rastreabilidade obrigatória em sinais e ordens (a implementar na Fase 6+)
 

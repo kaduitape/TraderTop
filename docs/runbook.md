@@ -190,10 +190,38 @@ porta. Nunca deixe ligado numa VPS.
 
 ## 5. Backup e retenção
 
-- **Banco de dados**: sem automação nesta fase — use `mysqldump`
-  (MySQL 8) periodicamente. Nenhuma tabela deste projeto é
-  particularmente grande exceto `ticks`, que já tem retenção configurável
-  (`TICK_RETENTION_DAYS`, `data purge-ticks`).
+- **Banco de dados**: sem automação de *backup* nesta fase — use
+  `mysqldump` (MySQL 8) periodicamente.
+- **Retenção**: automática desde a Fase 20, numa thread dentro do container
+  `app` (ver `docs/data-model.md` seção 3.1). Padrões: ticks 7 dias,
+  `data_quality_events` 14 dias (90 para CRITICAL), a cada 24h.
+
+  **Primeira limpeza, contra um acúmulo que já existe.** A rotina
+  automática limpa no máximo 2 milhões de linhas por execução, então um
+  acúmulo de meses levaria vários dias. Para resolver de uma vez, com o
+  mercado fechado:
+
+  ```bash
+  docker compose exec app python -m app.cli data retention --dry-run
+  docker compose exec app python -m app.cli data retention --max-chunks 100000
+  docker compose exec app python -m app.cli data retention --optimize
+  ```
+
+  O `--optimize` é o passo que devolve espaço ao sistema de arquivos:
+  `DELETE` sozinho libera páginas dentro do `.ibd` e **`df` não se mexe**.
+  Ele reconstrói a tabela, precisa de espaço livre da ordem do tamanho dela
+  e **bloqueia escrita** enquanto roda — por isso não está na rotina
+  automática. Confira o tamanho antes e depois:
+
+  ```sql
+  SELECT table_name,
+         ROUND(data_length/1024/1024) AS dados_mb,
+         ROUND(index_length/1024/1024) AS indices_mb,
+         table_rows
+    FROM information_schema.tables
+   WHERE table_schema = DATABASE()
+   ORDER BY data_length + index_length DESC;
+  ```
 - **Artefatos de modelo** (`models/`): cada versão é um arquivo
   `<versao>.joblib` + `<versao>_test.csv` imutável — nenhum é
   sobrescrito, só `manifest.json` muda (o ponteiro `current`). Faça

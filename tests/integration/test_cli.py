@@ -294,6 +294,57 @@ def test_cmd_data_purge_ticks_removes_old_rows(
     assert len(TickRepository(db_session).get_recent(symbol.id, limit=10)) == 0
 
 
+def test_cmd_data_retention_dry_run_deletes_nothing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, engine, db_session
+) -> None:
+    """A primeira limpeza e contra um acumulo de meses. Quem a roda precisa
+    poder ver os cortes antes de apagar."""
+    client = FakeMT5Client()
+    client.symbol_info_result = make_symbol_info(name="CLI_RETEN")
+    client.copy_ticks_range_result = make_ticks_array(
+        [(1_700_000_000, 1.1000, 1.1002, 0.0, 0.0, 1_700_000_000_000, 6, 0.0)]
+    )
+    _patch_connection(monkeypatch, client)
+
+    collect_args = cli.build_parser().parse_args(
+        ["collect", "ticks", "--symbol", "CLI_RETEN", "--seconds", "60"]
+    )
+    cli.cmd_collect_ticks(collect_args)
+    capsys.readouterr()
+
+    symbol = SymbolRepository(db_session).get_by_name("CLI_RETEN")
+    antes = len(TickRepository(db_session).get_recent(symbol.id, limit=10))
+    assert antes == 1
+
+    args = cli.build_parser().parse_args(["data", "retention", "--dry-run"])
+    result = cli.cmd_data_retention(args)
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "[dry-run] corte de ticks" in captured.out
+    assert "[dry-run] corte de qualidade" in captured.out
+    assert len(TickRepository(db_session).get_recent(symbol.id, limit=10)) == antes
+
+
+def test_cmd_data_retention_refuses_an_inverted_policy(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, engine
+) -> None:
+    """Sai com codigo 1 em vez de apagar com uma politica que faria os
+    eventos CRITICAL sumirem antes dos triviais."""
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "quality_event_retention_days", 30, raising=False)
+    monkeypatch.setattr(settings, "quality_event_critical_retention_days", 7, raising=False)
+
+    args = cli.build_parser().parse_args(["data", "retention"])
+    result = cli.cmd_data_retention(args)
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert "configuracao invalida" in captured.out
+
+
 def _make_synthetic_rate_rows(
     n: int, *, start_time: int = 1_700_000_000, step_seconds: int = 60
 ) -> list[tuple[int, float, float, float, float, int, int, int]]:

@@ -118,6 +118,35 @@ class TickRepository:
         )
         return list(self._session.execute(stmt).scalars())
 
+    def delete_batch_older_than(
+        self, *, cutoff: datetime, limit: int, symbol_id: int | None = None
+    ) -> int:
+        """Remove ATE `limit` ticks anteriores a `cutoff`. Devolve quantos.
+
+        Um lote. Quem chama repete ate vir zero e e dono do commit — ver
+        `app/maintenance/retention.py`, que e onde a transacao por lote faz
+        sentido. Zero significa "nao ha mais nada anterior ao corte".
+
+        Seleciona os ids e depois apaga por id, em vez de
+        `DELETE ... LIMIT`: o SQLite so aceita `LIMIT` em DELETE se tiver
+        sido compilado com `SQLITE_ENABLE_UPDATE_DELETE_LIMIT`, o que nao e
+        garantido, e a suite roda em SQLite. As duas consultas usam o
+        indice de `timestamp` e a chave primaria.
+        """
+        alvo = select(Tick.id).where(Tick.timestamp < cutoff)
+        if symbol_id is not None:
+            alvo = alvo.where(Tick.symbol_id == symbol_id)
+
+        ids = list(self._session.execute(alvo.limit(limit)).scalars())
+        if not ids:
+            return 0
+
+        result = cast(
+            CursorResult, self._session.execute(delete(Tick).where(Tick.id.in_(ids)))
+        )
+        self._session.flush()
+        return int(result.rowcount or 0)
+
     def purge_older_than(
         self, retention_days: int, *, now: datetime, symbol_id: int | None = None
     ) -> int:
@@ -129,7 +158,13 @@ class TickRepository:
         simbolos), que e o comportamento padrao da politica de retencao do
         sistema (`TICK_RETENTION_DAYS`). Passe um `symbol_id` para limitar a
         um unico simbolo (util para manutencao pontual sem afetar os
-        demais)."""
+        demais).
+
+        É UM `DELETE` SO. Serve para manutencao pontual e escopada, e para
+        a suite. A retencao automatica NAO passa por aqui: ela usa
+        `delete_batch_older_than` em lotes, porque um unico DELETE de
+        milhoes de linhas trava a tabela de ticks justamente enquanto a
+        coleta tenta escrever nela."""
         cutoff = now - timedelta(days=retention_days)
         stmt = delete(Tick).where(Tick.timestamp < cutoff)
         if symbol_id is not None:
